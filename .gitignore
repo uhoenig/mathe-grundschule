@@ -1,12 +1,4 @@
-__pycache__/
-*.pyc
-node_modules/
-tests/*.png
-tests/*.pdf
-tests/roundtrip.json
-.DS_Store
-
-# Lokale Zugangsdaten und Schlüsseldaten
+# Zugangsdaten niemals lesen oder hochladen.
 .env
 .env.*
 *.env
@@ -14,16 +6,21 @@ tests/roundtrip.json
 *.key
 *.p12
 *.pfx
-
-# Private Lernstände, Ergebnisberichte und Sicherungen
+# Lokale Lernstände und Sicherungen.
+MatheFreunde-*.json
 MatheQuest-Lernstand-*.json
 MatheQuest-Bericht-*.json
-MatheQuest-Rohstand.json
 exports/
 backups/
-
-# Lokale Entwicklungs- und Testartefakte
+# Entwicklungsartefakte.
+node_modules/
 .venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+tests/*.png
+tests/*.pdf
+tests/roundtrip.json
 playwright-report/
 test-results/
-*.log

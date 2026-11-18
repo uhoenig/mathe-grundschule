@@ -1,0 +1,24 @@
+name: Aufgaben und JavaScript prüfen
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript-Syntax
+        run: |
+          node --check app.js
+          node --check learning.js
+          node --check animals.js
+          node --check tests/grundschule-browser.cjs
+      - name: Alle Aufgaben unabhängig nachrechnen
+        run: node tests/learning.cjs

@@ -3,67 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101017">
-  <meta name="description" content="Deine lokale Lernreise zum mündlichen Mathematik-Abitur. Zehn Decks für Analysis und analytische Geometrie. Lernen und zeitlich geplant wiederholen.">
-  <title>MatheQuest · Mathematik in kleinen Schritten</title>
+  <meta name="theme-color" content="#f7f6ef">
+  <meta name="description" content="Mit Tierfreunden Mathe entdecken: kurze Lernabenteuer für Klasse 1 bis 4. Ohne Anmeldung und mit Lernfortschritt auf deinem Gerät.">
+  <title>MatheFreunde · Dein kleines Lernabenteuer</title>
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-  <script src="theme.js"></script>
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="theme.css">
-  <link rel="stylesheet" href="trainer.css">
-  <link rel="stylesheet" href="assets/katex/katex.min.css">
-  <script src="questions.js" defer></script>
-  <script src="final-questions.js" defer></script>
-  <script src="expanded-questions.js" defer></script>
-  <script src="competencies.js" defer></script>
-  <script src="journey.js" defer></script>
-  <script src="review.js" defer></script>
-  <script src="assets/katex/katex.min.js" defer></script>
-  <script src="math-content.js" defer></script>
-  <script src="math-text.js" defer></script>
+  <script src="animals.js" defer></script>
+  <script src="learning.js" defer></script>
   <script src="app.js" defer></script>
 </head>
-<body>
-  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
-    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
-    <symbol id="i-zap" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></symbol>
-    <symbol id="i-tree" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/></symbol>
-    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 3v17h17M8 15l4-5 4 3 5-7"/></symbol>
-    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5v16M12 5C8 2 4 3 2 4v15c3-1 7-1 10 2 3-3 7-3 10-2V4c-2-1-6-2-10 1Z"/></symbol>
-    <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M7 3h10v6a5 5 0 0 1-10 0V3ZM7 5H3v3a4 4 0 0 0 4 4m10-7h4v3a4 4 0 0 1-4 4M12 14v6m-4 1h8"/></symbol>
-    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
-    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
-    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
-    <symbol id="i-flame" viewBox="0 0 24 24"><path d="M13 2c1 5-3 6-3 10-2-1-3-3-3-3-7 9 1 15 7 12 8-4 3-12-1-19Z"/></symbol>
-    <symbol id="i-settings" viewBox="0 0 24 24"><path d="m9 3-1 3-3 1-2 3 2 2-1 3 3 3 3-1 2 4 3-1 1-3 3-1 2-3-2-2 1-3-3-3-3 1-2-3Z"/><circle cx="12" cy="12" r="3"/></symbol>
-    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
-    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 2 8 3v6c0 5-8 11-8 11S4 16 4 11V5Z"/><path d="m8 11 3 3 5-6"/></symbol>
-    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
-    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
-    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
-  </defs></svg>
+<body data-world="farm">
   <a class="skip-link" href="#main">Zum Inhalt</a>
-  <aside class="sidebar" id="sidebar">
-    <a href="#dashboard" class="brand" aria-label="MatheQuest Startseite"><img src="assets/favicon.svg" alt="" width="35" height="40"><span>Mathe<span class="brand-light">Quest</span><small>DEIN WISSEN. DEIN ABENTEUER.</small></span></a>
+  <header class="site-header"><div class="header-inner">
+    <a class="brand" href="#adventure" aria-label="MatheFreunde Startseite"><span class="brand-mark" aria-hidden="true">m<span>✦</span></span><span>Mathe<span class="brand-light">Freunde</span><small>KLEIN RECHNEN. GROSS ENTDECKEN.</small></span></a>
     <nav aria-label="Hauptnavigation">
-      <a href="#dashboard" data-nav="dashboard"><svg><use href="#i-zap"/></svg>Heute</a>
-      <a href="#decks" data-nav="decks"><svg><use href="#i-tree"/></svg>Decks</a>
+      <a href="#adventure" data-nav="adventure"><span aria-hidden="true">✦</span> Mein Abenteuer</a>
+      <a href="#album" data-nav="album"><span aria-hidden="true">♡</span> Mein Tieralbum <span class="album-count" id="album-count">0</span></a>
     </nav>
-    <div class="sidebar-bottom">
-      <a class="settings-link" href="#settings"><svg><use href="#i-settings"/></svg>Einstellungen & Daten</a>
-
-    </div>
-  </aside>
-  <div class="app-shell">
-    <header class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" id="menu-button" aria-label="Menü öffnen" aria-controls="sidebar" aria-expanded="false"><svg><use href="#i-menu"/></svg></button><strong id="page-label" hidden></strong></div><div class="topbar-right"><label class="theme-control" for="theme-choice"><span class="visually-hidden">Darstellung</span><select id="theme-choice" data-theme-choice><option value="light">Hell</option><option value="dark">Dunkel</option></select></label></div></header>
-    <main id="main" tabindex="-1"></main>
-    <footer><span>MatheQuest <span class="muted">· Schritt für Schritt zum Abitur.</span></span><span><span class="live-dot"></span> Dein Fortschritt bleibt auf diesem Gerät.</span></footer>
-  </div>
-  <dialog id="modal"><div id="modal-content"></div></dialog>
-  <div id="theme-notice" class="theme-notice" role="status" hidden></div>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <div id="level-up" class="level-up" aria-live="polite"></div>
+    <a class="settings-button" href="#settings" aria-label="Einstellungen für Erwachsene"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2-1 3 3 3 3-1 2 4 3-1 1-3 3-1 2-3-2-2 1-3-3-3-3 1-2-3Z"/><circle cx="12" cy="12" r="3"/></svg></a>
+  </div></header>
+  <main id="main" tabindex="-1"></main>
+  <footer class="site-footer"><a href="#adventure" class="footer-brand">MatheFreunde <span>· Mit Freude wachsen.</span></a><span><i aria-hidden="true"></i> Dein Fortschritt bleibt auf diesem Gerät.</span><a href="#settings">Für Erwachsene</a></footer>
+  <dialog id="dialog"><div id="dialog-content"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

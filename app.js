@@ -1,304 +1,169 @@
-/* MatheQuest – ohne Build-Schritt, Backend oder Netzwerkanfragen. */
+/* MatheFreunde: lokale Einzelkind-App, unabhängig von mathe-abi. */
 (() => {
-'use strict';
-const D = window.MQ_DOMAINS, CORE = window.MQ_QUESTIONS, FINAL = window.MQ_FINAL_QUESTIONS;
-const Q = [...CORE,...FINAL,...window.MQ_EXTRA_QUESTIONS];
-const questionById = Object.fromEntries(Q.map(q => [q.id,q]));
-const skills = D.flatMap(d => d.skills.map(s => ({...s,domain:d.id})));
-const skillById = Object.fromEntries(skills.map(s => [s.id,s]));
-const domainById = Object.fromEntries(D.map(d => [d.id,d]));
-// Bei inkompatiblen Änderungen an Aufgaben, Antwortreihenfolge oder XP-Regeln erhöhen.
-// Fehlendes progressVersion gehört ausschließlich zum unveränderten Altbestand (1).
-const J=window.MQ_JOURNEY,R=window.MQ_REVIEW,ACTIVE_IDS=J.questionIds,ACTIVE=Q.filter(q=>ACTIVE_IDS.includes(q.id));
-const KEY='mathequest.v1', PROGRESS_VERSION=3;
-const $=s=>document.querySelector(s);
-const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const mathText=value=>window.MQ_MATH.render(value);
-const icon=(name,cls='')=>`<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
-const button=(text,action,cls='',more='')=>`<button class="btn ${cls}" data-action="${action}" ${more}>${text}</button>`;
-const percent=(n,d)=>d?Math.round(100*n/d):0;
-const date=d=>new Intl.DateTimeFormat('de-DE',{day:'2-digit',month:'short',year:'numeric',timeZone:'Europe/Berlin'}).format(new Date(d));
-const newId=()=>crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);
-const fresh=()=>({app:'MatheQuest',version:1,progressVersion:PROGRESS_VERSION,sessions:[],active:null,archivedActive:null,oral:{},learning:J.fresh(),themePreference:window.MQ_THEME?.getPreference()||'light'});
-let state=fresh(), storageFailed=false, saveError='', storageMessage='', storedRaw=null, lastPersisted=null, tabDomain='analysis', solutionsOpen=false, solutionFilter='all', solutionSearch='', solutionsPromise=null, pendingImport=null,legacyCandidate=null;
-const labels={dashboard:'Heute',decks:'Decks',settings:'Einstellungen',quiz:'Lernen',report:'Ergebnis',solutions:'Lösungswege'};
-function validAnswer(a){return a===null||Number.isInteger(a)&&a>=-1&&a<=2;}
-function validPool(mode,ids){if(['daily','free'].includes(mode))return ids.every(id=>ACTIVE_IDS.includes(id));if(mode==='review')return ids.length<=5&&ids.every(id=>CORE.some(q=>q.id===id));return mode==='final'?ids.length===9&&ids.every(id=>FINAL.some(q=>q.id===id)):ids.every(id=>CORE.some(q=>q.id===id));}
-function copyGuessed(source,target,pending=false){
- if(source.guessed===undefined)return;
- if(!Array.isArray(source.guessed)||source.guessed.length!==source.ids.length||!source.guessed.every((value,i)=>typeof value==='boolean'&&(!value||Number.isInteger(source.answers[i])&&source.answers[i]>=0||pending&&source.answers[i]===null)))throw Error('Die Markierungen für geratene Antworten sind ungültig.');
- target.guessed=[...source.guessed];
-}
-function validate(raw){
- if(!raw||raw.app!=='MatheQuest'||raw.version!==1||!Array.isArray(raw.sessions))throw Error('Kein unterstützter MatheQuest-Lernstand.');
- const version=Object.hasOwn(raw,'progressVersion')?raw.progressVersion:1;
- if(![1,2,PROGRESS_VERSION].includes(version))throw Error('Inkompatible Fortschrittsversion. Der bisherige Stand bleibt geschützt.');
- const result=fresh(),seen=new Set();result.progressVersion=version;
- const modes=version<3?['diagnostic','domain','skill','review','final']:['diagnostic','domain','skill','review','final','daily','free'];
- function validIds(a){return Array.isArray(a.ids)&&a.ids.length>0&&a.ids.length<=Q.length&&new Set(a.ids).size===a.ids.length&&a.ids.every(id=>typeof id==='string'&&Object.hasOwn(questionById,id))&&Array.isArray(a.answers)&&a.answers.length===a.ids.length&&a.answers.every(validAnswer)&&modes.includes(a.mode)&&validPool(a.mode,a.ids)&&typeof a.title==='string'&&a.title.length<=150;}
- function validId(id){return typeof id==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(id)&&!Object.hasOwn(Object.prototype,id)&&!seen.has(id);}
- for(const a of raw.sessions){
-  if(!a||!validId(a.id)||!Number.isFinite(Date.parse(a.date))||!validIds(a))throw Error('Ungültige Trainingseinheit. Die vorhandenen Daten bleiben erhalten.');
-  if(version===1&&(a.mode==='review'||a.answers.includes(-1)||a.guessed!==undefined))throw Error('Diese Antworten benötigen mindestens Fortschrittsversion 2.');
-  const entry={id:a.id,date:new Date(a.date).toISOString(),mode:a.mode,title:a.title,ids:[...a.ids],answers:[...a.answers]};copyGuessed(a,entry);result.sessions.push(entry);seen.add(a.id);
- }
- if(raw.oral&&typeof raw.oral==='object'&&!Array.isArray(raw.oral))for(const [id,value]of Object.entries(raw.oral))if(Object.hasOwn(questionById,id)&&['yes','partial','no'].includes(value))result.oral[id]=value;
- function active(a,archive=false){
-  if(!a)return null;
-  if(!validIds(a)||!Number.isInteger(a.index)||a.index<0||a.index>=a.ids.length||!Number.isFinite(Date.parse(a.startedAt))||(a.id!==undefined&&!validId(a.id)))throw Error('Das gespeicherte Training ist ungültig.');
-  if(version===3&&!archive&&!['daily','free'].includes(a.mode))throw Error('Ein älterer Trainingsentwurf muss zuerst archiviert übernommen werden.');
-  if(version===1&&(a.mode==='review'||a.answers.includes(-1)||a.guessed!==undefined))throw Error('Diese Antworten benötigen mindestens Fortschrittsversion 2.');
-  if(a.selection!==undefined&&!validAnswer(a.selection))throw Error('Ungültige Antwortauswahl.');
-  const copy={id:a.id||newId(),mode:a.mode,title:a.title,ids:[...a.ids],answers:[...a.answers],index:a.index,selection:a.selection??null,startedAt:new Date(a.startedAt).toISOString()};copyGuessed(a,copy,true);return copy;
- }
- result.active=active(raw.active);result.archivedActive=active(raw.archivedActive,true);
- if(raw.themePreference!==undefined){if(!['system','light','dark'].includes(raw.themePreference))throw Error('Ungültige Darstellungseinstellung.');result.themePreference=raw.themePreference==='system'?(window.MQ_THEME?.getPreference()||'light'):raw.themePreference;}
- if(version===3){
-  const l=raw.learning,integer=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
-  if(!l||l.deckVersion!==J.CONFIG.deckVersion)throw Error('Unbekannte Deckbelegung. Bitte Originalstand sichern; kein automatischer Reset.');
-  if(!Array.isArray(l.unlockedDecks)||!l.unlockedDecks.length||l.unlockedDecks.some((id,i)=>id!==i+1)||l.unlockedDecks.length>J.decks.length||!l.unlockedDecks.includes(l.currentDeck)||!(l.newPerDay===null||integer(l.newPerDay,0,30)))throw Error('Ungültiger Deck- oder Tagesstatus.');
-  result.learning={...J.fresh(),unlockedDecks:[...l.unlockedDecks],currentDeck:l.currentDeck,newPerDay:l.newPerDay};
-  if(!l.reviews||typeof l.reviews!=='object'||Array.isArray(l.reviews)||!l.daily||typeof l.daily!=='object'||Array.isArray(l.daily))throw Error('Ungültiger Wiederholungsplan.');
-  for(const [id,c]of Object.entries(l.reviews)){
-   if(!ACTIVE_IDS.includes(id)||!c||!integer(c.attempts,1,250000)||!integer(c.correct,0,c.attempts)||!integer(c.step,-1,100)||!integer(c.intervalDays,1,36500)||![c.firstAt,c.lastAt,c.dueAt].every(d=>typeof d==='string'&&Number.isFinite(Date.parse(d))))throw Error('Ungültiger Wiederholungsstatus einer Aufgabe.');
-   result.learning.reviews[id]={attempts:c.attempts,correct:c.correct,step:c.step,intervalDays:c.intervalDays,firstAt:c.firstAt,lastAt:c.lastAt,dueAt:c.dueAt};
+  'use strict';
+  const A=window.MF_ANIMALS,L=window.MF_LEARNING,KEY='mathe-grundschule.progress.v1';
+  const main=document.querySelector('#main');
+  const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const arrow='<span aria-hidden="true">→</span>';
+  const icons={dots:'⠿',plus:'+',minus:'−',compare:'≶',trail:'↝',shapes:'△',groups:'×',share:'÷',clock:'◷',coin:'€',blocks:'▥',ruler:'↔',fraction:'◒'};
+  const fresh=()=>({app:'mathe-grundschule',version:1,grade:1,world:'farm',history:{},topics:{},collected:[],rounds:0,active:null,lastRound:null});
+  const worlds=new Set(A.worlds.map(w=>w.id));
+  let state=fresh(),lastRaw=null,storageError='',broken=false,conflict=false,pendingImport=null;
+  const int=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
+  function validate(raw) {
+    if(!raw||raw.app!=='mathe-grundschule'||raw.version!==1||!int(raw.grade,1,4)||!worlds.has(raw.world)||!int(raw.rounds,0,1000000))throw Error('Das ist kein unterstützter MatheFreunde-Lernstand.');
+    const out=fresh();out.grade=raw.grade;out.world=raw.world;out.rounds=raw.rounds;
+    if(!raw.history||typeof raw.history!=='object'||Array.isArray(raw.history)||!raw.topics||typeof raw.topics!=='object'||Array.isArray(raw.topics))throw Error('Der Lernstand ist unvollständig.');
+    for(const [id,h]of Object.entries(raw.history)) {
+      if(!Object.hasOwn(L.bank,id)||!h||!int(h.attempts,1,1000000)||!int(h.firstCorrect,0,h.attempts)||typeof h.needsReview!=='boolean'||!int(h.lastAt,0,9007199254740991))throw Error('Ungültiger Aufgabenfortschritt.');
+      out.history[id]={attempts:h.attempts,firstCorrect:h.firstCorrect,needsReview:h.needsReview,lastAt:h.lastAt};
+    }
+    for(const [id,t]of Object.entries(raw.topics)) {
+      if(!Object.hasOwn(L.topicById,id)||!t||!int(t.rounds,1,1000000)||!int(t.stars,1,3))throw Error('Ungültiger Themenfortschritt.');
+      out.topics[id]={rounds:t.rounds,stars:t.stars};
+    }
+    if(!Array.isArray(raw.collected)||new Set(raw.collected).size!==raw.collected.length||raw.collected.some(id=>!A.animals.some(a=>a.id===id)))throw Error('Ungültiges Tieralbum.');
+    out.collected=[...raw.collected];
+    if(raw.active) {
+      const a=raw.active;
+      if(typeof a.id!=='string'||a.id.length>100||!Object.hasOwn(L.topicById,a.topic)||!worlds.has(a.world)||!Array.isArray(a.ids)||a.ids.length!==5||new Set(a.ids).size!==5||a.ids.some(id=>!Object.hasOwn(L.bank,id)||L.bank[id].topic!==a.topic)||!int(a.index,0,4)||!Array.isArray(a.answers)||a.answers.length!==5)throw Error('Die gespeicherte Runde ist ungültig.');
+      const answers=a.answers.map((v,i)=>{
+        if(!v||!Array.isArray(v.wrong)||new Set(v.wrong).size!==v.wrong.length||v.wrong.some(n=>!int(n,0,2)||n===L.bank[a.ids[i]].correct)||typeof v.solved!=='boolean'||typeof v.assisted!=='boolean'||typeof v.hint!=='boolean'||(i<a.index&&!v.solved)||(i>a.index&&(v.solved||v.wrong.length||v.hint||v.assisted))||(v.assisted&&!v.solved))throw Error('Die gespeicherten Antworten sind ungültig.');
+        return {wrong:[...v.wrong],solved:v.solved,assisted:v.assisted,hint:v.hint};
+      });
+      out.active={id:a.id,topic:a.topic,world:a.world,ids:[...a.ids],index:a.index,answers};
+    }
+    if(raw.lastRound) {
+      const s=raw.lastRound;
+      if(!Object.hasOwn(L.topicById,s.topic)||!int(s.firstCorrect,0,5)||!int(s.stars,1,3)||!(s.reward===null||out.collected.includes(s.reward))||!worlds.has(s.world))throw Error('Der Rundenabschluss ist ungültig.');
+      out.lastRound={topic:s.topic,firstCorrect:s.firstCorrect,stars:s.stars,reward:s.reward,world:s.world};
+    }
+    return out;
   }
-  for(const [day,d]of Object.entries(l.daily)){
-   if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!d||!Array.isArray(d.newIds)||new Set(d.newIds).size!==d.newIds.length||d.newIds.some(id=>!ACTIVE_IDS.includes(id))||!integer(d.answered,0,Number.MAX_SAFE_INTEGER)||!Array.isArray(d.sessions)||new Set(d.sessions).size!==d.sessions.length||d.sessions.some(id=>!seen.has(id)))throw Error('Ungültiger Tagesfortschritt.');
-   result.learning.daily[day]={newIds:[...d.newIds],answered:d.answered,sessions:[...d.sessions]};
+  try {lastRaw=localStorage.getItem(KEY);if(lastRaw!==null)state=validate(JSON.parse(lastRaw));}
+  catch(e) {if(lastRaw!==null)broken=true;else storageError='Dein Browser kann gerade nicht speichern. Dein Fortschritt bleibt vorerst nur bis zum Schließen dieser Seite. Bitte sichere ihn unter „Für Erwachsene“.';}
+  function persist(candidate=state,transaction=false) {
+    if(conflict)return false;
+    try {
+      const current=localStorage.getItem(KEY);
+      if(current!==lastRaw){conflict=true;render();return false;}
+      const raw=JSON.stringify(candidate);localStorage.setItem(KEY,raw);lastRaw=raw;storageError='';
+      if(transaction)state=candidate;
+      return true;
+    } catch(e) {storageError='Speichern klappt gerade nicht. Deine Antworten bleiben in dieser Sitzung. Bitte sichere deinen Lernstand unter „Für Erwachsene“, bevor du die Seite schließt.';return false;}
   }
-  if(result.active&&result.active.ids.some(id=>!l.unlockedDecks.includes(J.deckFor[id])))throw Error('Das laufende Training enthält ein gesperrtes Deck.');
- }
- return result;
-}
-async function upgrade(old){
- await loadSolutions();const next={...old,progressVersion:PROGRESS_VERSION,learning:R.migrate(old.sessions,window.MQ_SOLUTIONS,ACTIVE_IDS),archivedActive:old.active||old.archivedActive||null,active:null};
- const journey=J.reconcile(next.learning,next.sessions,window.MQ_SOLUTIONS);next.learning.unlockedDecks=journey.unlockedDecks;next.learning.currentDeck=journey.currentDeck;return next;
-}
-
-try{
- lastPersisted=localStorage.getItem(KEY);
- if(lastPersisted!==null){
-  storedRaw=lastPersisted;
-  try{const loaded=validate(JSON.parse(storedRaw));if(loaded.progressVersion<3){legacyCandidate=loaded;saveError='Ein älterer Lernstand wurde gefunden. Bitte bestätige die Übernahme in MatheQuest 2.0.';}else{state=loaded;storedRaw=null;}}
-  catch(e){saveError=e instanceof SyntaxError?'Der gespeicherte Lernstand enthält ungültiges JSON. Er wurde nicht überschrieben.':e.message;}
- }
-}catch(e){storageFailed=true;storageMessage='Der Browser erlaubt gerade keinen Zugriff auf den Lernstand. Neue Antworten bleiben vorerst nur in dieser Sitzung. Exportiere sie vor dem Schließen als JSON.';}
-function storageNotice(){
- if(!storageFailed&&!saveError)return '';
- return `<div id="storage-notice" class="save-warning" role="alert"><p>${esc(saveError||storageMessage)}</p>${saveError?'':button('Speichern erneut versuchen','retry-save')} ${button('Sitzungsstand exportieren','export-all')}</div>`;
-}
-function updateStorageNotice(){
- $('#storage-notice')?.remove();
- if($('#main')&&!saveError)$('#main').insertAdjacentHTML('afterbegin',storageNotice());
-}
-function storageFailure(){
- storageFailed=true;
- storageMessage='Automatisches Speichern ist fehlgeschlagen. Deine Änderungen sind nur in dieser Sitzung vorhanden. Bitte nicht neu laden: Exportiere den Lernstand als JSON oder versuche das Speichern erneut.';
- updateStorageNotice();
-}
-function save(){
- if(saveError)return false;
- try{
-  const current=localStorage.getItem(KEY);
-  if(current!==lastPersisted){
-   storedRaw=current;saveError='Der gespeicherte Lernstand wurde in einem anderen Tab geändert. Deine Sitzung hat ihn nicht überschrieben. Sichere deine Sitzung vor dem Neuladen.';render();return false;
+  function notice() {return storageError?`<aside class="storage-notice" role="alert">${esc(storageError)} <button data-action="retry-save">Erneut speichern</button> <a href="#settings">Lernstand sichern</a></aside>`:'';}
+  function toast(message) {const el=document.querySelector('#toast');el.textContent=message;el.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>{el.hidden=true;},3500);}
+  const world=id=>A.worlds.find(w=>w.id===(id||state.world));
+  const starRow=n=>`<span class="stars" aria-label="${n} von 3 Sternen">${[1,2,3].map(i=>`<span class="${i<=n?'earned':''}" aria-hidden="true">★</span>`).join('')}</span>`;
+  function modal(title,body) {document.querySelector('#dialog-content').innerHTML=`<button class="dialog-close" data-action="close-dialog" aria-label="Schließen">×</button><h2>${title}</h2>${body}`;const d=document.querySelector('#dialog');if(!d.open)d.showModal();}
+  const close=()=>document.querySelector('#dialog').close();
+  function go(page) {if(location.hash===`#${page}`)render();else location.hash=page;}
+  function adventure() {
+    const w=world(),topics=L.topics.filter(t=>t.grade===state.grade),finished=topics.filter(t=>state.topics[t.id]).length;
+    const next=topics.find(t=>!state.topics[t.id])||topics.reduce((a,b)=>(state.topics[a.id]?.stars||0)<=(state.topics[b.id]?.stars||0)?a:b);
+    const active=state.active,activeTopic=active&&L.topicById[active.topic];
+    return `<section class="welcome-row"><div><span class="eyebrow">DEIN KLEINES LERNABENTEUER</span><h1>Hallo, Tierfreund<span class="accent-dot">!</span></h1><p>Schön, dass du da bist. Was entdecken wir heute?</p></div><div class="grade-choice"><span>Ich lerne in</span><div role="group" aria-label="Klassenstufe auswählen">${[1,2,3,4].map(n=>`<button data-action="grade" data-grade="${n}" aria-pressed="${n===state.grade}">Klasse ${n}</button>`).join('')}</div></div></section>
+    <section class="hero"><div class="hero-copy"><span class="hero-tag"><i></i> MIT DEINEN TIERFREUNDEN</span><h2>Kleine Schritte.<br>Große <span>Abenteuer.</span></h2><p>Entdecke Mathe mit ${esc(w.buddy)} und deinen Tierfreunden. Fünf kleine Aufgaben. Ganz in deinem Tempo.</p><button class="button primary" data-action="${active?'resume':'start'}" data-topic="${next.id}">${active?'Weiter geht’s':'Los geht’s!'} ${arrow}</button><span class="hero-note"><span aria-hidden="true">♡</span> Du darfst ausprobieren. Fehler helfen beim Lernen.</span></div><div class="hero-art"><img src="assets/learning-friends.webp" alt="Ein freundlicher Dino, ein Pony, ein Schweinchen und ein Löwenkind spielen gemeinsam auf einer Wiese." fetchpriority="high" width="1536" height="1024"><span class="art-spark spark-one" aria-hidden="true">✧</span><span class="art-spark spark-two" aria-hidden="true">✦</span><div class="art-note"><span aria-hidden="true">✦</span><div>Jedes Abenteuer zählt.<small>Zusammen wachsen wir!</small></div></div></div></section>
+    ${active?`<section class="resume-strip"><span class="resume-icon" aria-hidden="true">↝</span><div><strong>Dein Abenteuer wartet auf dich.</strong><span>Klasse ${activeTopic.grade} · ${esc(activeTopic.name)} · Aufgabe ${active.index+1} von 5</span></div><button class="button small" data-action="resume">Weitermachen ${arrow}</button></section>`:''}
+    <section class="world-section" aria-labelledby="world-heading"><div class="section-heading"><div><span class="eyebrow">WOHIN SOLL’S GEHEN?</span><h2 id="world-heading">Wähle deine Tierwelt</h2></div><span class="quiet">Deine Welt. Deine Lieblingsfreunde.</span></div><div class="world-grid" role="group" aria-label="Tierwelt auswählen">${A.worlds.map((v,i)=>`<button class="world-card ${v.id===state.world?'selected':''}" style="--world-color:${v.color}" data-action="world" data-world="${v.id}" aria-pressed="${v.id===state.world}"><span class="world-art">${A.svg(v.animal)}</span><span class="world-text"><strong>${v.name}</strong><small>${['Mit Pippa & Freunden','Mit Flocke & Freunden','Mit Leo & Freunden','Mit Momo & Freunden'][i]}</small></span><span class="world-check" aria-hidden="true">${v.id===state.world?'✓':'↗'}</span></button>`).join('')}</div></section>
+    <section class="path-section" aria-labelledby="path-heading"><div class="section-heading"><div><span class="eyebrow">SCHRITT FÜR SCHRITT</span><h2 id="path-heading">Dein Lernpfad <span class="class-label">Klasse ${state.grade}</span></h2></div><span class="path-count">${finished} von ${topics.length} entdeckt <span class="mini-progress"><i style="width:${finished/topics.length*100}%"></i></span></span></div><div class="topic-grid">${topics.map((t,i)=>{const p=state.topics[t.id];return `<button class="topic-card ${p?'visited':''}" data-action="start" data-topic="${t.id}"><span class="topic-top"><span class="topic-symbol symbol-${t.icon}" aria-hidden="true">${icons[t.icon]}</span><span class="topic-step">${String(i+1).padStart(2,'0')}</span></span><strong>${t.name}</strong><span class="topic-description">${t.description}</span><span class="topic-bottom">${p?starRow(p.stars):'<span>5 kleine Aufgaben</span>'}<span class="topic-arrow" aria-hidden="true">→</span></span></button>`;}).join('')}</div></section>
+    <section class="album-teaser"><div class="teaser-art">${A.svg(w.animal)}</div><div><span class="eyebrow">PLATZ FÜR NEUE FREUNDE</span><h2>Ein Abenteuer. Ein neuer Tierfreund.</h2><p>Nach jeder Runde zieht ein Tier in dein Album ein. Wer wartet wohl auf dich?</p></div><a class="button secondary" href="#album">Mein Tieralbum <span class="pill">${state.collected.length}/12</span> ${arrow}</a></section>`;
   }
-  const serialized=JSON.stringify(state);
-  localStorage.setItem(KEY,serialized);lastPersisted=serialized;
-  storageFailed=false;storageMessage='';updateStorageNotice();return true;
- }catch(e){storageFailure();return false;}
-}
-// Import und Reset ersetzen den Zustand erst nach Bestätigung UND erfolgreichem Schreiben.
-function replaceState(next){
- try{const serialized=JSON.stringify(next);localStorage.setItem(KEY,serialized);lastPersisted=serialized;}
- catch(e){storageFailure();toast('Der Lernstand konnte nicht gespeichert werden. Der bisherige Stand bleibt erhalten.');return false;}
- state=next;window.MQ_THEME?.setPreference(state.themePreference);storedRaw=null;legacyCandidate=null;saveError='';storageFailed=false;storageMessage='';solutionsOpen=false;return true;
-}
-function recovery(){
- return `${heading('Deinen Lernstand schützen','Es wurde nichts automatisch gelöscht oder ersetzt.')}<section class="panel"><p role="alert">${esc(saveError)}</p><p>Du kannst den gespeicherten Rohstand sichern, einen passenden JSON-Lernstand importieren oder nach Rückfrage neu beginnen.</p><div class="button-row">${legacyCandidate?button('In MatheQuest 2.0 übernehmen','upgrade','btn-primary'):''}${storedRaw!==null?button('Gespeicherten Rohstand sichern','export-stored','btn-primary'):''}${button('Sitzungsstand exportieren','export-all')}${button('JSON-Datei auswählen','import')}${button('Seite neu laden','reload')}${button('Lernstand zurücksetzen','reset','btn-danger')}</div><input type="file" id="import-file" accept="application/json,.json" hidden></section>`;
-}
-function toast(message){$('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('visible'),4000);}
-function loadSolutions(){
- if(window.MQ_SOLUTIONS)return Promise.resolve(window.MQ_SOLUTIONS);
- if(!solutionsPromise)solutionsPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='solutions.js';script.onload=()=>window.MQ_SOLUTIONS?resolve(window.MQ_SOLUTIONS):reject(Error('Der Lösungsschlüssel ist ungültig.'));script.onerror=()=>{solutionsPromise=null;script.remove();reject(Error('solutions.js konnte nicht geladen werden. Bitte prüfe, ob alle Projektdateien im selben Ordner liegen.'));};document.head.append(script);});
- return solutionsPromise;
-}
-function shuffle(array){const a=[...array];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
-const level=xp=>Math.min(60,1+Math.floor(xp/50));
-function compute(){
- const histories={}, reports={};let xp=0,totalCorrect=0,totalAnswered=0;
- const key=window.MQ_SOLUTIONS;
- for(const s of state.sessions){let score=0,earned=0;const byDomain={},bySkill={};
-  s.ids.forEach((id,i)=>{const q=questionById[id],answer=s.answers[i],answered=answer!==null,correct=!!key&&answered&&answer===key[id].correct;
-   if(!histories[id])histories[id]={attempts:0,correct:0,xp:0,latest:false,sessions:new Set()};
-   const h=histories[id];
-   for(const [group,name]of [[byDomain,q.domain],[bySkill,q.skill]]){if(!group[name])group[name]={total:0,correct:0,answered:0};group[name].total++;if(answered)group[name].answered++;if(correct)group[name].correct++;}
-   if(correct){const reward=FINAL.some(q=>q.id===id)?0:Math.min(h.attempts===0?10:5,20-h.xp);h.xp+=reward;earned+=reward;h.correct++;score++;totalCorrect++;}
-   if(answered){h.attempts++;h.latest=correct&&!s.guessed?.[i];h.sessions.add(s.id);totalAnswered++;}
+  function shapeSVG(shape) {const shapes={circle:'<circle cx="100" cy="75" r="55"/>',triangle:'<path d="m100 15 70 115H30Z"/>',square:'<rect x="45" y="20" width="110" height="110" rx="3"/>',rectangle:'<rect x="20" y="40" width="160" height="80" rx="3"/>'};return `<svg viewBox="0 0 200 150" class="shape-visual" aria-label="Eine geometrische Form" role="img" fill="#b9d1bc" stroke="#54725c" stroke-width="3">${shapes[shape]}</svg>`;}
+  function visual(q,w) {
+    const v=q.visual;if(!v)return '';
+    if(v.type==='count')return `<div class="count-visual" aria-label="Zählbild">${Array.from({length:v.n},()=>A.svg(w.animal,'count-animal')).join('')}</div>`;
+    if(v.type==='addition')return `<div class="addition-visual" aria-label="Zwei Mengen zum Zusammenzählen"><div>${Array.from({length:v.a},()=>'<i></i>').join('')}</div><b aria-hidden="true">+</b><div>${Array.from({length:v.b},()=>'<i></i>').join('')}</div></div>`;
+    if(v.type==='groups')return `<div class="group-visual" role="img" aria-label="${v.groups} Gruppen mit je ${v.each} Punkten">${Array.from({length:v.groups},()=>`<div class="dot-group">${Array.from({length:v.each},()=>'<i></i>').join('')}</div>`).join('')}</div>`;
+    if(v.type==='shape')return shapeSVG(v.shape);
+    if(v.type==='coins')return `<div class="coins-visual">${v.values.map(n=>`<span>${n}<small>Cent</small></span>`).join('<b>+</b>')}</div>`;
+    if(v.type==='clock') {const minute=v.minute*6,hour=(v.hour%12)*30+v.minute*.5;return `<svg viewBox="0 0 220 220" class="clock-visual" role="img" aria-label="Analoge Uhr"><circle cx="110" cy="110" r="99" fill="#fffdf7" stroke="#d6b76d" stroke-width="8"/>${Array.from({length:12},(_,i)=>{const angle=(i+1)*Math.PI/6;return `<text x="${110+78*Math.sin(angle)}" y="${116-78*Math.cos(angle)}" text-anchor="middle" fill="#3e5143" font-size="18" font-family="sans-serif">${i+1}</text>`;}).join('')}<path d="M110 110V61" stroke="#3e5143" stroke-width="7" stroke-linecap="round" transform="rotate(${hour} 110 110)"/><path d="M110 110V38" stroke="#c88e58" stroke-width="5" stroke-linecap="round" transform="rotate(${minute} 110 110)"/><circle cx="110" cy="110" r="6" fill="#3e5143"/></svg>`;}
+    if(v.type==='fraction')return `<div class="fraction-visual" style="--parts:${v.b}" role="img" aria-label="${v.b} gleich große Teile, davon ${v.a} grün">${Array.from({length:v.b},(_,i)=>`<span class="${i<v.a?'filled':''}"></span>`).join('')}</div>`;
+    if(v.type==='rectangle')return `<div class="rectangle-visual"><span class="rect-top">${v.a} cm</span><span class="rect-side">${v.b} cm</span><div style="--cols:${v.a};--rows:${v.b};aspect-ratio:${v.a}/${v.b}">${v.area?Array.from({length:v.a*v.b},()=>'<i></i>').join(''):''}</div></div>`;
+    return '';
+  }
+  function quiz() {
+    const a=state.active;if(!a){go('adventure');return '';}
+    const q=L.bank[a.ids[a.index]],answer=a.answers[a.index],w=world(a.world),t=L.topicById[a.topic];
+    const feedback=answer.solved?`<div class="feedback success" role="status" tabindex="-1"><span class="feedback-mark" aria-hidden="true">✓</span><div><strong>${answer.assisted?'Zusammen haben wir’s geschafft!':answer.wrong.length?'Prima, du hast weitergedacht!':'Das hast du richtig gut gemacht!'}</strong><p>${esc(q.explanation)}</p></div></div>`:answer.wrong.length?`<div class="feedback encouragement" role="status"><span aria-hidden="true">♡</span><div><strong>Noch ein kleiner Versuch.</strong><p>${esc(q.hint)}</p></div></div>`:answer.hint?`<div class="feedback encouragement" role="status"><span aria-hidden="true">✦</span><div><strong>Ein Tipp für dich</strong><p>${esc(q.hint)}</p></div></div>`:'';
+    return `<div class="quiz-shell"><div class="quiz-top"><a href="#adventure" class="back-link">← Pause machen</a><span>Klasse ${t.grade} · ${esc(t.name)}</span><span class="quiz-counter">${a.index+1}<small> / 5</small></span></div><div class="quiz-progress" role="progressbar" aria-label="Aufgaben geschafft" aria-valuemin="0" aria-valuemax="5" aria-valuenow="${a.index+(answer.solved?1:0)}">${a.answers.map((v,i)=>`<span class="${v.solved?'done':i===a.index?'current':''}"></span>`).join('')}</div><div class="buddy-line">${A.svg(w.animal,'buddy-art')}<p><strong>${esc(w.buddy)} begleitet dich.</strong><span>${answer.solved?'Wir sind ein tolles Team!':'Lass dir Zeit. Wir schaffen das zusammen.'}</span></p></div><section class="question-panel"><span class="eyebrow">DEIN ${a.index+1}. KLEINER SCHRITT</span><h1 class="question-title" tabindex="-1">${esc(q.prompt)}</h1>${visual(q,w)}<div class="answers" role="group" aria-label="Wähle eine Antwort">${q.options.map((option,i)=>`<button class="answer ${option.length>6?'long':''} ${answer.solved&&i===q.correct?'correct':''} ${answer.wrong.includes(i)?'tried':''}" data-action="answer" data-answer="${i}" ${answer.solved||answer.wrong.includes(i)?'disabled':''}><span class="answer-letter" aria-hidden="true">${answer.solved&&i===q.correct?'✓':answer.wrong.includes(i)?'↻':['A','B','C'][i]}</span><span>${esc(option)}</span></button>`).join('')}</div>${feedback}<div class="question-actions">${answer.solved?`<span class="reassurance">${a.index===4?'Dein Tierfreund wartet schon.':'Ein kleiner Schritt weiter.'}</span><button class="button primary" data-action="next">${a.index===4?'Runde geschafft!':'Nächste Aufgabe'} ${arrow}</button>`:`<button class="text-button" data-action="hint">${answer.hint?'Tipp noch einmal ansehen':'Ich brauche einen Tipp'} <span aria-hidden="true">✧</span></button><button class="text-button" data-action="explain">Zeig mir, wie’s geht ${arrow}</button>`}</div></section><p class="quiz-footer">Kein Zeitdruck. Kein Stress. Nur du und deine Neugier.</p></div>`;
+  }
+  function album() {
+    return `<section class="page-heading"><span class="eyebrow">DEINE KLEINE TIERFAMILIE</span><h1>Hallo, neue Freunde<span class="accent-dot">!</span></h1><p>Jede abgeschlossene Runde bringt einen Tierfreund in dein Album.</p></section><div class="album-summary"><span class="large-heart" aria-hidden="true">♡</span><div><strong>${state.collected.length} von 12 Tierfreunden entdeckt</strong><p>${state.collected.length===12?'Alle sind da! Deine Freunde freuen sich auf weitere Abenteuer mit dir.':'Deine Freunde warten auf dich. Du musst nicht alles richtig machen, um sie zu entdecken.'}</p></div><a href="#adventure" class="button primary">Weiter entdecken ${arrow}</a></div>${A.worlds.map(w=>`<section class="album-world"><div class="section-heading"><h2>${w.name}</h2><span class="quiet">${state.collected.filter(id=>A.animals.find(a=>a.id===id).world===w.id).length} von 3 Freunden</span></div><div class="album-grid">${A.animals.filter(a=>a.world===w.id).map(an=>{const found=state.collected.includes(an.id);return `<article class="album-card ${found?'collected':'undiscovered'}" style="--world-color:${w.color}"><div class="album-animal">${found?A.svg(an.id):'<span class="egg" aria-hidden="true">?</span>'}</div><span class="eyebrow">${found?'DEIN TIERFREUND':'WER SICH HIER VERSTECKT?'}</span><h3>${found?an.name:'Noch ein kleiner Freund'}</h3><p>${found?'Schön, dass wir zusammen lernen!':'Schließe eine Runde ab und entdecke ein Tier.'}</p>${found?'<span class="collected-tag">♡ Im Team</span>':''}</article>`;}).join('')}</div></section>`).join('')}`;
+  }
+  function result() {
+    const r=state.lastRound;if(!r){go('adventure');return '';}
+    const t=L.topicById[r.topic],an=A.animals.find(a=>a.id===r.reward),w=world(r.world);
+    return `<section class="result-panel"><span class="eyebrow">FÜNF KLEINE SCHRITTE. EIN GROSSES LÄCHELN.</span><h1>Du bist ein Stück gewachsen!</h1><p>Du hast dich mit „${esc(t.name)}“ beschäftigt. Darauf kannst du stolz sein.</p><div class="result-stars">${starRow(r.stars)}</div><div class="new-friend" style="--world-color:${w.color}">${A.svg(an?.id||w.animal)}<span class="reward-spark" aria-hidden="true">✦</span></div><span class="eyebrow">${an?'EIN NEUER FREUND FÜR DEIN ALBUM':'DEINE TIERFREUNDE FREUEN SICH'}</span><h2>${an?`Hallo, ${an.name}!`:'Schön, dass du weiterlernst!'}</h2><p>${an?'Dieser Tierfreund gehört jetzt zu deinem Team.':'Du hast schon alle zwölf Tiere entdeckt. Zusammen könnt ihr noch viel lernen!'}</p><div class="result-insight"><span aria-hidden="true">♡</span> ${r.firstCorrect===5?'Alle fünf Aufgaben gleich beim ersten Versuch gelöst. Toll mitgedacht!':'Du hast alle fünf Aufgaben geschafft – auch mit Tipps und Ausprobieren. So geht Lernen!'}</div><div class="button-row"><button class="button primary" data-action="again" data-topic="${t.id}">Noch ein kleines Abenteuer ${arrow}</button><a href="#album" class="button secondary">Mein Tieralbum</a></div><a href="#adventure" class="back-link">Zurück zu meinen Abenteuern</a></section>`;
+  }
+  function settings() {
+    return `<section class="page-heading"><span class="eyebrow">FÜR ERWACHSENE</span><h1>Ein guter Platz zum Lernen.</h1><p>Ein Kind, ein Browser, viele kleine Entdeckungen.</p></section><div class="settings-grid"><section class="settings-card"><span class="setting-icon" aria-hidden="true">↗</span><h2>Lernstand sichern</h2><p>Fortschritt, Tieralbum und eine laufende Runde als Datei herunterladen. Damit lässt sich der Stand auch auf ein anderes Gerät übertragen.</p><button class="button primary" data-action="export">Sicherung herunterladen</button></section><section class="settings-card"><span class="setting-icon" aria-hidden="true">↙</span><h2>Lernstand wiederherstellen</h2><p>Eine Sicherung von MatheFreunde auswählen. Der aktuelle Stand wird erst nach Prüfung und deiner Bestätigung ersetzt.</p><button class="button secondary" data-action="import">Sicherung auswählen</button><input id="import-file" type="file" accept="application/json,.json" hidden></section><section class="settings-card"><h2>So wird gelernt</h2><p>24 Themen für Klasse 1–4, jeweils mit 20 Aufgabenvarianten. Eine Runde enthält fünf Aufgaben. Schwierigkeiten tauchen in späteren Runden bevorzugt wieder auf.</p><p>Alle Klassen und Themen sind frei zugänglich. Sterne zeigen den bisherigen Rundenerfolg. Ein Tier gibt es auch mit Hilfestellung. Es gibt keinen Zeitdruck und keine Rangliste.</p><p>Dieses erste Grundlagenpaket ergänzt Unterricht und gemeinsames Lernen. Es bildet nicht den gesamten Grundschullehrplan ab.</p></section><section class="settings-card"><h2>Speicherung & Datenschutz</h2><p>Antworten und Einstellungen werden ausschließlich im lokalen Speicher dieses Browsers gespeichert. Es gibt keine Anmeldung, keine automatische Synchronisierung und keine eigenen Analyse- oder Trackingdienste.</p><p>Privates Surfen oder gelöschte Browserdaten können den Lernstand entfernen. Regelmäßige Sicherungen helfen. Die Sicherungsdatei enthält Lerndaten.</p><p>Beim Laden über GitHub Pages verarbeitet GitHub Verbindungsdaten. <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">Datenschutzhinweise von GitHub ↗</a></p></section></div><section class="reset-card"><div><h2>Ganz von vorn anfangen</h2><p>Fortschritt und Album auf diesem Browser zurücksetzen.</p></div><button class="button danger" data-action="reset">Lernstand zurücksetzen</button></section>`;
+  }
+  function recovery() {return `<section class="recovery-panel"><span class="eyebrow">DEIN LERNSTAND BLEIBT GESCHÜTZT</span><h1>${conflict?'Die Seite ist noch in einem anderen Tab offen.':'Der Lernstand konnte nicht gelesen werden.'}</h1><p>${conflict?'In einem anderen Tab wurde weitergelernt. Lade den aktuellen Stand, bevor du hier weitermachst. Du kannst diesen Sitzungsstand vorher sichern.':'Die gespeicherten Daten wurden nicht verändert. Sichere sie zuerst. Danach kannst du eine gültige Sicherung laden oder neu anfangen.'}</p><div class="button-row"><button class="button primary" data-action="${conflict?'reload':'export-raw'}">${conflict?'Aktuellen Stand laden':'Gespeicherte Daten sichern'}</button><button class="button secondary" data-action="${conflict?'export':'import'}">${conflict?'Diesen Sitzungsstand sichern':'Sicherung laden'}</button>${!conflict?'<button class="button danger" data-action="reset">Neu anfangen</button>':''}</div><input id="import-file" type="file" accept="application/json,.json" hidden></section>`;}
+  function render(focus=false) {
+    document.body.dataset.world=state.active&&location.hash==='#quiz'?state.active.world:state.world;
+    const routes={adventure,quiz,album,result,settings};let page=location.hash.slice(1)||'adventure';if(!Object.hasOwn(routes,page))page='adventure';
+    document.body.classList.toggle('is-quiz',page==='quiz');
+    document.querySelectorAll('[data-nav]').forEach(el=>{const selected=el.dataset.nav===(['quiz','result'].includes(page)?'adventure':page);if(selected)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
+    document.querySelector('#album-count').textContent=state.collected.length;
+    main.innerHTML=(broken||conflict)?recovery():notice()+routes[page]();
+    document.title=`${({adventure:'Mein Abenteuer',quiz:'Zusammen lernen',album:'Mein Tieralbum',result:'Runde geschafft',settings:'Für Erwachsene'})[page]} · MatheFreunde`;
+    if(focus){const target=main.querySelector('.question-title,h1')||main;target.tabIndex=-1;target.focus({preventScroll:true});window.scrollTo({top:0,behavior:'instant'});}
+  }
+  function begin(topicId,force=false) {
+    if(!Object.hasOwn(L.topicById,topicId))return;
+    if(state.active&&!force){modal('Dein Abenteuer läuft noch.',`<p>Du kannst deine Runde weitermachen oder eine neue beginnen. Bereits gelöste Aufgaben bleiben gespeichert.</p><div class="button-row"><button class="button primary" data-action="resume">Runde weitermachen</button><button class="button secondary" data-action="replace-round" data-topic="${topicId}">Neue Runde beginnen</button></div>`);return;}
+    state.active={id:globalThis.crypto?.randomUUID?.()||`round-${Date.now()}-${Math.random()}`,topic:topicId,world:state.world,ids:L.queue(topicId,state.history),index:0,answers:Array.from({length:5},()=>({wrong:[],solved:false,assisted:false,hint:false}))};
+    persist();go('quiz');
+  }
+  function solve(assisted=false) {
+    const a=state.active;if(!a)return;const q=L.bank[a.ids[a.index]],v=a.answers[a.index];if(v.solved)return;
+    v.solved=true;v.assisted=assisted;
+    const first=!v.wrong.length&&!v.hint&&!assisted,h=state.history[q.id]||{attempts:0,firstCorrect:0,needsReview:false,lastAt:0};
+    state.history[q.id]={attempts:h.attempts+1,firstCorrect:h.firstCorrect+(first?1:0),needsReview:!first,lastAt:Date.now()};
+    persist();render();main.querySelector('.feedback')?.focus({preventScroll:true});
+  }
+  function finish() {
+    const a=state.active;if(!a||!a.answers.every(v=>v.solved))return;
+    const firstCorrect=a.answers.filter(v=>!v.wrong.length&&!v.hint&&!v.assisted).length,stars=firstCorrect===5?3:firstCorrect>=3?2:1;
+    const old=state.topics[a.topic]||{rounds:0,stars:0};state.topics[a.topic]={rounds:old.rounds+1,stars:Math.max(old.stars,stars)};
+    const available=A.animals.filter(an=>!state.collected.includes(an.id)),reward=(available.find(an=>an.world===a.world)||available[0])?.id||null;
+    if(reward)state.collected.push(reward);state.rounds++;state.lastRound={topic:a.topic,world:a.world,firstCorrect,stars,reward};state.active=null;
+    persist();go('result');
+  }
+  function download(data,filename,raw=false) {const url=URL.createObjectURL(new Blob([raw?data:JSON.stringify(data,null,2)],{type:'application/json'})),el=document.createElement('a');el.href=url;el.download=filename;document.body.append(el);el.click();el.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  document.addEventListener('click',event=>{
+    const b=event.target.closest('[data-action]');if(!b||b.disabled)return;const action=b.dataset.action;
+    if((broken||conflict)&&!['export','export-raw','import','reset','confirm-reset','close-dialog','reload','confirm-import'].includes(action))return;
+    if(action==='grade'){state.grade=Number(b.dataset.grade);persist();render();}
+    if(action==='world'){state.world=b.dataset.world;persist();render();toast(`${world().buddy} freut sich auf dich!`);}
+    if(action==='start'||action==='again')begin(b.dataset.topic);
+    if(action==='replace-round'){close();begin(b.dataset.topic,true);}
+    if(action==='resume'){close();go('quiz');}
+    if(action==='answer'){
+      const a=state.active;if(!a)return;const q=L.bank[a.ids[a.index]],v=a.answers[a.index],n=Number(b.dataset.answer);if(v.solved||v.wrong.includes(n))return;
+      if(n===q.correct)solve();else{v.wrong.push(n);v.hint=true;persist();render();main.querySelector('.answers .answer:not(:disabled)')?.focus({preventScroll:true});}
+    }
+    if(action==='hint'){const a=state.active;if(a&&!a.answers[a.index].solved){a.answers[a.index].hint=true;persist();render();}}
+    if(action==='explain')solve(true);
+    if(action==='next'){const a=state.active;if(!a||!a.answers[a.index].solved)return;if(a.index===4)finish();else{a.index++;persist();render(true);}}
+    if(action==='close-dialog')close();
+    if(action==='export')download({...state,exportedAt:new Date().toISOString()},`MatheFreunde-Lernstand-${new Date().toISOString().slice(0,10)}.json`);
+    if(action==='export-raw')download(lastRaw||'',`MatheFreunde-Originalstand.json`,true);
+    if(action==='import')document.querySelector('#import-file')?.click();
+    if(action==='confirm-import'&&pendingImport){if(persist(pendingImport,true)){pendingImport=null;broken=false;close();go('adventure');toast('Dein Lernstand ist wieder da.');}else toast('Wiederherstellen fehlgeschlagen. Der bisherige Stand bleibt erhalten.');}
+    if(action==='reset')modal('Wirklich von vorn anfangen?',`<p>Dein Tieralbum und dein Lernfortschritt werden auf diesem Browser gelöscht. Sichere deinen Stand, wenn du ihn behalten möchtest.</p><div class="button-row"><button class="button secondary" data-action="${broken?'export-raw':'export'}">Erst sichern</button><button class="button primary" data-action="close-dialog">Behalten</button><button class="button danger" data-action="confirm-reset">Ja, neu anfangen</button></div>`);
+    if(action==='confirm-reset'){if(persist(fresh(),true)){broken=false;close();go('adventure');toast('Ein neues Abenteuer beginnt.');}else toast('Zurücksetzen fehlgeschlagen. Der bisherige Stand bleibt erhalten.');}
+    if(action==='retry-save'){if(persist())toast('Dein Lernstand ist gespeichert.');render();}
+    if(action==='reload')location.reload();
   });
-  xp+=earned;reports[s.id]={score,xp:earned,byDomain,bySkill,level:level(xp),unknown:s.answers.filter(a=>a===-1).length,guessed:s.guessed?.filter(Boolean).length||0};
- }
- const competency={};
- for(const s of skills){const ids=CORE.filter(q=>q.skill===s.id).map(q=>q.id), hs=ids.map(id=>histories[id]).filter(h=>h&&h.attempts>0);const unique=hs.length,correct=hs.filter(h=>h.latest).length,attempts=hs.reduce((sum,h)=>sum+h.attempts,0),hits=hs.reduce((sum,h)=>sum+h.correct,0),sessions=new Set(hs.flatMap(h=>[...h.sessions])).size;
-  let status='untested';if(unique){status='uncertain';if(unique>=3&&correct/unique>=.6)status='partial';if(unique===5&&correct/unique>=.8&&hits/attempts>=.8&&sessions>=2)status='secure';}
-  competency[s.id]={status,unique,correct,attempts,hits,rate:percent(hits,attempts),sessions};
- }
- return{histories,reports,xp,level:level(xp),totalCorrect,totalAnswered,competency,unique:CORE.filter(q=>histories[q.id]?.attempts>0).length};
-}
-let computed=compute();
-function refresh(){computed=compute();const journey=J.reconcile(state.learning,state.sessions,window.MQ_SOLUTIONS||{});state.learning.unlockedDecks=journey.unlockedDecks;state.learning.currentDeck=journey.currentDeck;}
-const statusNames={untested:'Noch offen',uncertain:'Im Aufbau',partial:'Teilweise sicher',secure:'Sicher geübt'};
-function statusBadge(value){return `<span class="status ${value}"><span class="live-dot" style="background:var(--status-${value});width:4px;height:4px"></span>${statusNames[value]}</span>`;}
-function heading(title,subtitle,extra=''){return `<div class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${extra}</div>`;}
-function examNote(){return `<div class="exam-note">${icon('info')}<span>Für die Hamburger Oberstufe · Die konkrete Prüfungsrelevanz richtet sich nach deinem Unterricht und den offiziellen Vorgaben. XP zeigen deinen Einsatz; Kompetenz wird getrennt bewertet.</span></div>`;}
-function progressBar(p){return `<div class="progress-track" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100"><span style="width:${p}%"></span></div>`;}
-function reviewPlan(){return R.plan(state.learning,J.decks);}
-function dueLabel(time){return new Intl.DateTimeFormat('de-DE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Berlin'}).format(new Date(time));}
-function answerLabel(q,answer,guessed=false){return answer===null?'Ausgelassen':answer===-1?'Weiß nicht':q.options[answer]+(guessed?' (historisch als geraten markiert)':'');}
-function setMenuOpen(open){$('#sidebar').classList.toggle('open',open);$('#menu-button').setAttribute('aria-expanded',String(open));$('#menu-button').setAttribute('aria-label',open?'Menü schließen':'Menü öffnen');}
-let freeDeck=1,freeDomain='all',freeTopic='all',lastUnlocks=[],lastUnlockSession='';
-function deckStats(){return J.progress(state.sessions,window.MQ_SOLUTIONS||{});}
-function dashboard(){
- const plan=reviewPlan(),a=state.active,ready=plan.queue.length;
- dashboard.signature=JSON.stringify([plan.queue,plan.newIds.length,plan.due.length]);
- const done=plan.nextDue?`Die nächste Wiederholung ist am ${dueLabel(plan.nextDue)} fällig.`:'Du hast alle verfügbaren Fragen bearbeitet. Du kannst jederzeit weiterüben.';
- return `<section class="daily-card" aria-labelledby="daily-title"><h1 id="daily-title">${a?'Weiterlernen':ready?'Deine Lernrunde':'Gut für heute.'}</h1><p>${a?`${a.answers.filter(x=>x!==null).length} von ${a.ids.length} Fragen beantwortet.`:ready?'Neue Fragen und fällige Wiederholungen. Lerne in deinem Tempo.':esc(done)}</p>${button(`${a?'Fortsetzen':ready?'Lernen starten':'Weiter üben'} ${icon('arrow')}`,a?'resume':'start-daily','btn-primary')}</section>`;
-}
-function decks(){
- const stats=deckStats();
- return `<h1 class="visually-hidden">Themen und Schwierigkeitsstufen</h1><section class="adventure-map" aria-label="Deine Lernreise"><svg class="map-terrain" viewBox="0 0 1000 1600" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><pattern id="terrain-grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="currentColor" stroke-width=".5"/></pattern><g id="map-pines" fill="none" stroke="currentColor" stroke-width="2"><path d="m0 0-14 24h8l-14 20h40L6 24h8ZM0 44v9"/></g><g id="map-peaks" fill="none" stroke="currentColor" stroke-width="2"><path d="m0 55 34-55 35 55m-48-34 13 7 13-7m10 34 29-40 29 40"/></g></defs><rect width="1000" height="1600" fill="url(#terrain-grid)" opacity=".3"/><g opacity=".55"><use href="#map-peaks" x="740" y="30"/><use href="#map-peaks" x="90" y="620"/><use href="#map-peaks" x="720" y="1200"/><use href="#map-pines" x="55" y="340"/><use href="#map-pines" x="85" y="365"/><use href="#map-pines" x="930" y="760"/><use href="#map-pines" x="900" y="790"/><use href="#map-pines" x="100" y="1300"/><path d="M400 0c-110 170 200 210 80 400s-180 220-80 400 160 300 70 470-70 230-20 330" fill="none" stroke="currentColor" stroke-width="18" opacity=".12"/><circle cx="900" cy="100" r="34" fill="none" stroke="currentColor"/><path d="m900 48 9 43 43 9-43 9-9 43-9-43-43-9 43-9Z" fill="none" stroke="currentColor"/></g></svg><ol class="deck-journey" aria-label="Themen und Schwierigkeitsstufen">${J.decks.map((d,i)=>{
-  const st=stats[i],open=state.learning.unlockedDecks.includes(d.id),current=d.id===state.learning.currentDeck;
-  const topics=['analysis','geometry'].map(domain=>{const names=[...new Set(d.questionIds.map(id=>questionById[id]).filter(q=>q.domain===domain).map(q=>skillById[q.skill]?.name).filter(Boolean))];return `<div class="station-topic"><span>${domain==='geometry'?'Analytische Geometrie':esc(domainById[domain].name)}</span><h2>${names.map(esc).join(' · ')}</h2></div>`;}).join('');
-  return `<li style="--map-row:${Math.floor(i/2)+1};--map-column:${Math.floor(i/2)%2?2-i%2:1+i%2}" class="journey-station ${open?'unlocked':'locked'} ${st.complete?'completed':current?'current':''}"><span class="map-marker" aria-hidden="true">${st.complete?icon('check'):String(d.id).padStart(2,'0')}</span><div class="station-top"><span class="station-level">${esc(d.level)}</span><span class="station-status">${!open?'Noch gesperrt':st.complete?'Geschafft':current?'Aktuell':'Offen'}</span></div>${topics}${button(open?'Auswählen':'Noch gesperrt','choose-deck','btn-ghost',`data-deck="${d.id}" ${open?'':'disabled'}`)}</li>`;
- }).join('')}</ol></section>`;
-}
-function makeSession(mode){
- let ids,title;if(mode==='daily'){ids=reviewPlan().queue;if(!ids.length)ids=shuffle(ACTIVE.filter(q=>state.learning.unlockedDecks.includes(J.deckFor[q.id]))).map(q=>q.id);title=`Heute · Deck ${state.learning.currentDeck}`;}else{ids=shuffle(ACTIVE.filter(q=>(!freeDeck||J.deckFor[q.id]===freeDeck)&&state.learning.unlockedDecks.includes(J.deckFor[q.id])&&(freeDomain==='all'||q.domain===freeDomain)&&(freeTopic==='all'||q.skill===freeTopic))).map(q=>q.id);title=freeDeck?`Freies Training · Deck ${freeDeck}`:'Freies Training · offene Decks';}
- return {id:newId(),mode,title,ids,answers:ids.map(()=>null),index:0,selection:null,startedAt:new Date().toISOString()};
-}
-function start(mode){
- if(saveError)return;
- if(state.active){showDialog('Training wechseln?',`<p>Dein laufendes Training bleibt beim Fortsetzen erhalten. Ein neuer Start ersetzt nur diesen noch nicht abgeschlossenen Durchlauf.</p><div class="button-row">${button('Fortsetzen','resume','btn-primary')}${button('Neues Training starten','confirm-start','',`data-mode="${mode}"`)}</div>`);return;}
- const next=makeSession(mode);if(!next.ids.length){toast('Gerade sind keine passenden Aufgaben verfügbar.');render();return;}state.active=next;save();go('quiz');
-}
-function quiz(){
- const a=state.active;if(!a)return `${heading('Kein laufendes Training','Starte deine nächste Runde auf Heute.')}<a class="btn btn-primary" href="#dashboard">Zu Heute</a>`;
- const q=questionById[a.ids[a.index]],chosen=a.answers[a.index],selection=chosen===null?a.selection:chosen,answered=a.answers.filter(x=>x!==null).length,solution=chosen!==null?window.MQ_SOLUTIONS?.[q.id]:null,correct=solution&&chosen===solution.correct;
- const currentDeck=J.deckFor[q.id],canFinishEarly=chosen!==null&&a.index<a.ids.length-1&&J.progress([...state.sessions,a],window.MQ_SOLUTIONS||{}).find(d=>d.id===currentDeck)?.complete;
- const feedback=solution?`<div id="answer-feedback" class="answer-feedback ${chosen===-1?'unknown':correct?'correct':'incorrect'}" role="status" tabindex="-1"><strong>${icon(chosen===-1?'info':correct?'check':'close')}${chosen===-1?'Schauen wir uns den Lösungsweg an.':correct?'Richtig!':'Noch nicht richtig.'}</strong>${!correct?`<p>Richtige Antwort: <b>${mathText(q.options[solution.correct])}</b></p>`:''}<h2 class="feedback-title">So geht’s</h2><ol class="feedback-steps">${solution.steps.map(step=>`<li>${mathText(step)}</li>`).join('')}</ol></div>`:'';
- return `<div class="quiz-wrap"><div class="quiz-progress"><div class="quiz-progress-text"><span>Frage ${a.index+1} von ${a.ids.length}</span><span>${answered} beantwortet</span></div>${progressBar(percent(answered,a.ids.length))}</div><section class="question-card"><div class="question-meta"><span class="tag">${q.domain==='analysis'?'Analysis':'Analytische Geometrie'}</span><span>${esc(skillById[q.skill].name)}</span><span>Deck ${J.deckFor[q.id]}</span></div><h1 class="question-title" tabindex="-1">${mathText(q.prompt)}</h1><div class="answer-options" role="group" aria-label="Antwort auswählen">${q.options.map((option,i)=>`<button class="answer-option ${selection===i?'selected':''} ${solution&&i===solution.correct?'answer-correct':''} ${solution&&i===chosen&&!correct?'answer-incorrect':''}" aria-pressed="${selection===i}" data-action="answer" data-answer="${i}" ${chosen!==null?'disabled':''}><span class="answer-key">${'ABC'[i]}</span><span>${mathText(option)}</span>${solution&&i===solution.correct?`<span class="answer-result">${icon('check')}Richtig</span>`:''}</button>`).join('')}</div>${button('Weiß nicht','answer',`btn-ghost unknown-answer ${selection===-1?'selected':''}`,`data-answer="-1" aria-pressed="${selection===-1}" ${chosen!==null?'disabled':''}`)}${feedback}</section><div class="quiz-nav ${canFinishEarly?'can-finish':''}">${button('Zurück','quiz-prev','btn-ghost',a.index===0?'disabled':'')}${canFinishEarly?button('Runde abschließen','submit','btn-ghost'):''}${a.index<a.ids.length-1?button(`Nächste Frage ${icon('arrow')}`,'quiz-next','btn-primary',chosen===null?'disabled':''):button('Ergebnis ansehen','submit','btn-primary',chosen===null?'disabled':'')}</div></div>`;
-}
-function showDialog(title,content){$('#modal-content').innerHTML=`<div class="dialog-content"><h2>${title}</h2>${content}</div>`;if(!$('#modal').open)$('#modal').showModal();}
-function closeDialog(){if($('#modal').open)$('#modal').close();}
-async function submit(confirmed=false){
- const a=state.active;if(!a||submit.busy||saveError)return;
- const missing=a.answers.filter(x=>x===null).length;if(missing&&!confirmed){showDialog('Runde vorzeitig abschließen?',`<p>${missing} Fragen sind noch nicht beantwortet. Sie bleiben ohne Antwort und geben keine XP.</p><div class="button-row">${button('Weiterlernen','close-dialog','btn-primary')}${button('Jetzt auswerten','confirm-submit')}</div>`);return;}
- submit.busy=true;closeDialog();try{
-  await loadSolutions();if(state.active!==a||saveError)return;
-  const entry={id:a.id,mode:a.mode,title:a.title,date:new Date().toISOString(),ids:[...a.ids],answers:[...a.answers]},before=[...state.learning.unlockedDecks];
-  state.sessions.push(entry);state.active=null;state.learning=R.apply(state.learning,entry,window.MQ_SOLUTIONS,ACTIVE_IDS);refresh();lastUnlocks=state.learning.unlockedDecks.filter(id=>!before.includes(id));lastUnlockSession=entry.id;save();go(`report/${entry.id}`);
- }catch(e){toast(e.message);}finally{submit.busy=false;}
-}
-function report(id){
- const s=state.sessions.find(s=>s.id===id);if(!s)return `${heading('Ergebnis nicht gefunden','Diese Einheit ist nicht in deinem Lernstand enthalten.')}<a href="#dashboard" class="btn">Zu Heute</a>`;
- const r=computed.reports[id];return `${heading('Ein Schritt weiter.','Deine Runde ist abgeschlossen.')}${lastUnlocks.length&&lastUnlockSession===id?`<section class="unlock-notice" role="status">${icon('check')}<div><strong>${lastUnlocks.map(n=>`Deck ${n}`).join(', ')} freigeschaltet</strong><p>Du kannst dort neue Themen lernen.</p></div></section>`:''}<section class="panel report-hero"><div class="score-ring" style="--score:${percent(r.score,s.ids.length)}%"><div><strong>${r.score}/${s.ids.length}</strong><small>RICHTIG</small></div></div><div><h2>${r.score===s.ids.length?'Alles richtig. Gut geübt!':'So geht es weiter.'}</h2><p class="answer-breakdown">${r.unknown} × Weiß nicht · +${r.xp} XP</p><p>${s.mode==='free'?'Freies Training: Der Wiederholungsplan ist unverändert.':'Die Antworten und Wiederholungstermine sind gespeichert.'}</p></div><div class="report-rewards"><strong>+${r.xp} XP</strong></div></section><div class="report-next"><a href="#dashboard" class="btn btn-primary">Zu Heute ${icon('arrow')}</a><a href="#decks" class="btn btn-ghost">Decks ansehen</a></div><details class="disclosure report-details"><summary>Antworten & Bericht</summary><div class="disclosure-body">${s.ids.map((qid,i)=>{const q=questionById[qid],solution=window.MQ_SOLUTIONS[qid];return `<article class="report-question"><h3>${mathText(q.prompt)}</h3><p>Deine Antwort: ${mathText(answerLabel(q,s.answers[i],s.guessed?.[i]))}</p><p>Richtig: ${mathText(q.options[solution.correct])}</p><p>${mathText(solution.explanation)}</p></article>`;}).join('')}<div class="button-row">${button('Bericht als JSON','export-report','',`data-session="${s.id}"`)}${button('Drucken / PDF','print')}</div></div></details>`;
-}
-
-function solutionMarkup(q){const a=window.MQ_SOLUTIONS[q.id];return `<details class="solution-item"><summary><span>${q.id}</span>${mathText(q.prompt)}</summary><div class="solution-body"><h4>Richtige Antwort</h4><div class="solution-answer">${mathText(q.options[a.correct])}</div><h4>Schritt für Schritt</h4><ol>${a.steps.map(step=>`<li>${mathText(step)}</li>`).join('')}</ol><h4>Mathematischer Hintergrund</h4><p>${mathText(a.background)}</p><h4>Typischer Denkfehler</h4><p>${mathText(a.misconception)}</p><h4 class="oral-label">Zum Laut-Erklären</h4><p>${mathText(a.oral)}</p><div class="teacher-field"><label for="oral-${q.id}">Einschätzung der Lehrkraft: Konnte die Schülerin ihre Antwort mathematisch begründen?</label><select id="oral-${q.id}" data-oral="${q.id}"><option value="">Noch nicht bewertet</option><option value="yes" ${state.oral[q.id]==='yes'?'selected':''}>Ja</option><option value="partial" ${state.oral[q.id]==='partial'?'selected':''}>Teilweise</option><option value="no" ${state.oral[q.id]==='no'?'selected':''}>Nein</option></select></div></div></details>`;}
-function solutions(){
- const pool=ACTIVE.filter(q=>state.learning.unlockedDecks.includes(J.deckFor[q.id]));
- return `${heading('Lösungswege & Erklären','Aufgaben aus deinen offenen Decks. Erkläre die Schritte zusätzlich laut.')}<div class="button-row"><a href="#settings" class="btn btn-ghost">Zurück zu Einstellungen</a></div>${pool.map(solutionMarkup).join('')}`;
-}
-function themeSettings(){
- const preference=window.MQ_THEME?.getPreference()||'light';
- return `<section class="panel theme-settings"><h2>Deine Darstellung</h2><p>Wähle Hell oder Dunkel. Deine Auswahl bleibt auf diesem Gerät gespeichert.</p><label for="theme-setting">Farbschema</label><select id="theme-setting" data-theme-choice><option value="light" ${preference==='light'?'selected':''}>Hell</option><option value="dark" ${preference==='dark'?'selected':''}>Dunkel</option></select><p class="storage-note">Die Darstellung bleibt bei einem Lernstandreset erhalten.</p></section>`;
-}
-
-function settings(){return `${heading('Einstellungen & Daten','Dein Lernstand bleibt in diesem Browser.')}<div class="settings-grid">${themeSettings()}<section class="panel"><h2>Lernstand sichern</h2><p>JSON enthält Antworten, offene Decks, Wiederholungstermine, Tagesfortschritt, Entwurf und Darstellung. Keine automatische Synchronisierung.</p>${button('Lernstand exportieren','export-all','btn-primary')}</section><section class="panel"><h2>Lernstand importieren</h2><p>Die Datei wird geprüft und ersetzt deinen Stand erst nach Bestätigung. Ältere Stände benötigen eine bestätigte Übernahme.</p>${button('JSON-Datei auswählen','import')}<input type="file" id="import-file" accept="application/json,.json" hidden></section><section class="panel"><h2>Verstehen & mündlich üben</h2><p>Lösungswege und Erklärimpulse zu deinen offenen Decks.</p><a class="btn" href="#solutions">Lösungswege öffnen</a></section><section class="panel"><h2>Übernommene Daten</h2><p>${state.sessions.filter(s=>!['daily','free'].includes(s.mode)).length} frühere Einheiten bleiben im vollständigen Export erhalten. ${state.archivedActive?'Ein alter Trainingsentwurf ist ebenfalls archiviert.':''} Stochastik ist derzeit nicht im aktiven Lernprogramm.</p><p>Neue Fragen und Designupdates behalten deinen Stand. Unbekannte Datenversionen werden geschützt abgewiesen.</p></section><section class="panel"><h2>Speicherung & Datenschutz</h2><p>Browserdaten löschen und privates Surfen können Lernstände entfernen. Exportiere regelmäßig eine Sicherung. Exporte enthalten Lerndaten.</p><p>Die App sendet Antworten nicht an den Betreiber. Beim Laden über GitHub Pages verarbeitet der Hostinganbieter Verbindungsdaten.</p></section><section class="panel"><h2>Aufgaben</h2><p>${ACTIVE.length} aktive Aufgaben in zehn Decks. Umfang und Schwierigkeit werden ausgebaut. XP bleiben eine dezente Begleitung und schalten keine Decks frei.</p></section></div><section class="panel reset-panel"><h2>Neuanfang</h2><p>Alle lokalen Lerndaten werden erst nach deiner Bestätigung gelöscht. Sichere den Stand vorher als JSON.</p>${button('Lernstand zurücksetzen','reset','btn-danger')}</section>`;}
-
-function download(data,filename,raw=false){const blob=new Blob([raw?data:JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Deine JSON-Datei wurde zum Download bereitgestellt.');}
-function exportAll(){download({...state,themePreference:window.MQ_THEME?.getPreference()||state.themePreference,exportedAt:new Date().toISOString()},`MatheQuest-Lernstand-${new Date().toISOString().slice(0,10)}.json`);}
-async function importFile(file){if(!file)return;try{if(file.size>5*1024*1024)throw Error('Die Datei ist zu groß (maximal 5 MB).');const raw=JSON.parse(await file.text());if(raw?.kind==='report')throw Error('Dies ist ein einzelner Ergebnisbericht. Bitte wähle einen vollständigen Lernstand aus „Einstellungen & Daten“.');pendingImport=validate(raw);await loadSolutions();showDialog('Lernstand ersetzen?',`<p>${pendingImport.progressVersion<3?'Ältere Version: Decks und Termine werden neu berechnet; ein alter Entwurf wird im Archiv erhalten. ':''}Die Datei enthält ${pendingImport.sessions.length} abgeschlossene Einheiten${pendingImport.active?' und ein laufendes Training':''}. Der aktuelle Lernstand wird ersetzt.</p><p>Exportiere deinen bisherigen Lernstand zuerst, wenn du ihn behalten möchtest.</p><div class="button-row">${button('Bisherigen Stand exportieren','export-all')}${button('Abbrechen','close-dialog')}${button('Importieren & ersetzen','confirm-import','btn-primary')}</div>`);}catch(e){pendingImport=null;toast(e instanceof SyntaxError?'Die Datei enthält kein gültiges JSON.':e.message);}}
-const routes={dashboard,decks,solutions,settings,quiz};
-function go(page){if(location.hash.slice(1)===page)return render();location.hash=page;}
-let renderToken=0;
-async function render(){const token=++renderToken;let [page,id]=(location.hash.slice(1)||'dashboard').split('/');const aliases={world:'decks',training:'decks',skills:'decks',achievements:'dashboard',progress:'dashboard'};if(Object.hasOwn(aliases,page))page=aliases[page];if(!Object.hasOwn(labels,page))page='dashboard';if(saveError){$('#main').innerHTML=recovery();$('#page-label').hidden=false;$('#page-label').textContent='Lernstand schützen';setMenuOpen(false);return;}if((state.sessions.length||page==='solutions'||(page==='quiz'&&state.active?.answers.some(answer=>answer!==null)))&&!window.MQ_SOLUTIONS){$('#main').innerHTML='<div class="panel">Dein Lernstand wird geladen …</div>';try{await loadSolutions();if(token!==renderToken)return;}catch(e){$('#main').innerHTML=`<div class="save-warning">${esc(e.message)}</div>`;return;}}refresh();if(page==='solutions'&&state.active)solutionsOpen=false;
- document.body.classList.toggle('is-learning',page==='quiz');
- document.querySelectorAll('[data-nav]').forEach(a=>{const group={quiz:'dashboard',report:'dashboard',solutions:'settings'};const active=a.dataset.nav===(group[page]||page);a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('#page-label').hidden=['dashboard','decks','quiz'].includes(page);$('#page-label').textContent=labels[page];document.title=`${labels[page]} · MatheQuest`;
- const content=page==='report'?report(id):routes[page]();$('#main').innerHTML=storageNotice()+content;
- setMenuOpen(false);
-}
-function rerenderQuiz(focusAnswer){const y=window.scrollY;render();window.scrollTo(0,y);if(focusAnswer!==undefined)$('#answer-feedback')?.focus();}
-document.addEventListener('click',async event=>{
- const el=event.target.closest('[data-action]');if(!el||el.disabled)return;event.preventDefault();const action=el.dataset.action;
- if(saveError&&!['export-all','export-stored','import','confirm-import','reset','confirm-reset','close-dialog','reload','upgrade','confirm-upgrade'].includes(action))return;
- switch(action){
- case 'start-daily':start('daily');break;
- case 'start-free':start('free');break;
- case 'choose-deck':{const id=Number(el.dataset.deck);if(!state.learning.unlockedDecks.includes(id))break;state.learning.currentDeck=id;freeDeck=id;freeDomain='all';freeTopic='all';save();go('dashboard');break;}
- case 'confirm-start':closeDialog();state.active=null;start(el.dataset.mode);break;
- case 'resume':closeDialog();go('quiz');break;
- case 'answer':{
-  const a=state.active,index=a?.index,value=Number(el.dataset.answer);if(!a||a.answers[index]!==null||!validAnswer(value)||loadSolutions.answerBusy)break;
-  loadSolutions.answerBusy=true;a.selection=value;save();el.disabled=true;
-  try{await loadSolutions();if(saveError||state.active!==a||a.index!==index||a.answers[index]!==null)break;a.answers[index]=value;a.selection=null;if(a.guessed)a.guessed[index]=false;save();await render();$('#answer-feedback')?.focus();}
-  catch(e){toast(e.message);if(el.isConnected)el.disabled=false;}finally{loadSolutions.answerBusy=false;}break;
- }
- case 'quiz-prev':case 'quiz-next':case 'quiz-jump':{
-  const a=state.active;if(!a)break;const index=action==='quiz-prev'?a.index-1:action==='quiz-next'?a.index+1:Number(el.dataset.index);if(!Number.isInteger(index)||index<0||index>=a.ids.length)break;
-  a.index=index;a.selection=null;save();await render();$('.question-title')?.focus();break;
- }
- case 'submit':await submit();break;
- case 'confirm-submit':await submit(true);break;
- case 'close-dialog':pendingImport=null;closeDialog();break;
- case 'export-all':exportAll();break;
- case 'export-stored':if(storedRaw!==null)download(storedRaw,'MatheQuest-Rohstand.json',true);break;
- case 'reload':location.reload();break;
- case 'retry-save':if(save()){render();toast('Dein Lernstand wurde gespeichert.');}break;
- case 'export-report':{
-  const s=state.sessions.find(s=>s.id===el.dataset.session);if(!s)break;
-  download({app:'MatheQuest',version:1,progressVersion:PROGRESS_VERSION,kind:'report',session:s,result:computed.reports[s.id],exportedAt:new Date().toISOString()},`MatheQuest-Bericht-${s.id}.json`);break;
- }
- case 'print':window.print();break;
- case 'import':$('#import-file')?.click();break;
- case 'confirm-import':{
-  if(!pendingImport)break;try{const next=pendingImport.progressVersion<3?await upgrade(pendingImport):pendingImport;if(replaceState(next)){pendingImport=null;closeDialog();refresh();render();toast('Dein Lernstand wurde importiert.');}}catch(e){toast(e.message);}break;
- }
- case 'upgrade':showDialog('Lernstand in MatheQuest 2.0 übernehmen?',`<p>Deine bisherigen Einheiten und Antworten bleiben erhalten. Offene Decks und Wiederholungstermine werden aus ihnen neu berechnet. Ein alter laufender Durchlauf bleibt als Archiv im Export erhalten.</p><p>Sichere zuerst den Originalstand, wenn du zur älteren App zurückkehren möchtest.</p><div class="button-row">${button('Originalstand sichern','export-stored')}${button('Abbrechen','close-dialog')}${button('Übernahme bestätigen','confirm-upgrade','btn-primary')}</div>`);break;
- case 'confirm-upgrade':{
-  if(!legacyCandidate)break;el.disabled=true;try{if(localStorage.getItem(KEY)!==lastPersisted)throw Error('Der Speicher wurde zwischenzeitlich geändert. Bitte zuerst sichern und neu laden.');const next=await upgrade(legacyCandidate);if(replaceState(next)){closeDialog();refresh();go('dashboard');toast('Dein Lernstand wurde übernommen.');}}
-  catch(e){toast(e.message);}finally{if(el.isConnected)el.disabled=false;}break;
- }
- case 'reset':showDialog('Lernstand wirklich zurücksetzen?',`<p>Alle Einheiten, Wiederholungstermine, Freischaltungen und archivierten Entwürfe dieses Browsers werden gelöscht. Sichere sie vorher, wenn du sie behalten möchtest.</p><div class="button-row">${button('Abbrechen','close-dialog')}${button('Jetzt zurücksetzen','confirm-reset','btn-danger')}</div>`);break;
- case 'confirm-reset':if(replaceState(fresh())){pendingImport=null;closeDialog();refresh();go('dashboard');toast('Dein Lernstand beginnt wieder mit Deck 1.');}break;
- }
-});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#sidebar').classList.contains('open')){setMenuOpen(false);$('#menu-button').focus();}});
-document.addEventListener('change',event=>{
- const el=event.target;
- if(el.id==='import-file'){importFile(el.files[0]);el.value='';return;}
- if(saveError)return;
- if(el.matches('[data-theme-choice]')){state.themePreference=window.MQ_THEME.getPreference();save();}
-
- if(['free-deck','free-domain','free-topic'].includes(el.id)){
-  if(el.id==='free-deck'){const id=Number(el.value);if(id!==0&&!state.learning.unlockedDecks.includes(id))return;freeDeck=id;freeTopic='all';}
-  if(el.id==='free-domain'){freeDomain=['analysis','geometry'].includes(el.value)?el.value:'all';freeTopic='all';}
-  if(el.id==='free-topic')freeTopic=el.value;
-  const y=scrollY;render();scrollTo(0,y);$('#'+el.id)?.focus({preventScroll:true});
- }
- if(el.dataset.oral&&Object.hasOwn(questionById,el.dataset.oral)){if(['yes','partial','no'].includes(el.value))state.oral[el.dataset.oral]=el.value;else delete state.oral[el.dataset.oral];save();}
-});
-
-$('#menu-button').addEventListener('click',()=>setMenuOpen(!$('#sidebar').classList.contains('open')));
-document.addEventListener('click',e=>{if($('#sidebar').classList.contains('open')&&!e.target.closest('#sidebar')&&!e.target.closest('#menu-button'))setMenuOpen(false);});
-// Fälligkeiten wechseln auch in einem offen gelassenen Tab; keine Antworten oder Speicherwerte werden dabei verändert.
-function refreshDue(){if((!location.hash||location.hash==='#dashboard')&&!$('#modal').open&&!document.hidden&&!saveError){const plan=reviewPlan();if(JSON.stringify([plan.queue,plan.newIds.length,plan.due.length])!==dashboard.signature)render();}}
-setInterval(refreshDue,60000);window.addEventListener('focus',refreshDue);
-let printDetails=[];
-window.addEventListener('beforeprint',()=>{printDetails=[...document.querySelectorAll('main details:not([open])')];for(const detail of printDetails)detail.open=true;});
-window.addEventListener('afterprint',()=>{for(const detail of printDetails)detail.open=false;printDetails=[];});
-window.addEventListener('hashchange',()=>{closeDialog();render();window.scrollTo(0,0);});
-window.addEventListener('storage',e=>{if(e.storageArea===localStorage&&(e.key===KEY||e.key===null)){storedRaw=e.newValue;saveError='Der Lernstand wurde in einem anderen Tab geändert oder gelöscht. Deine Sitzung wird nicht darüber gespeichert. Exportiere sie vor dem Neuladen.';render();}});
-render();
+  document.addEventListener('change',async event=>{
+    if(event.target.id!=='import-file')return;const file=event.target.files?.[0];event.target.value='';if(!file)return;
+    try{if(file.size>2*1024*1024)throw Error('Die Datei ist zu groß. Bitte wähle eine MatheFreunde-Sicherung bis 2 MB.');pendingImport=validate(JSON.parse(await file.text()));modal('Diesen Lernstand laden?',`<p>Die Sicherung enthält ${pendingImport.rounds} abgeschlossene Runden und ${pendingImport.collected.length} Tierfreunde. Sie ersetzt deinen aktuellen Stand.</p><div class="button-row"><button class="button secondary" data-action="export">Bisherigen Stand sichern</button><button class="button secondary" data-action="close-dialog">Abbrechen</button><button class="button primary" data-action="confirm-import">Lernstand laden</button></div>`);}
+    catch(e){pendingImport=null;toast(e instanceof SyntaxError?'Die Datei enthält kein gültiges JSON. Dein Stand bleibt erhalten.':e.message);}
+  });
+  window.addEventListener('hashchange',()=>render(true));
+  window.addEventListener('storage',event=>{if((event.key===KEY||event.key===null)&&event.newValue!==lastRaw){conflict=true;close();render(true);}});
+  render();
 })();

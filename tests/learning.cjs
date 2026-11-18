@@ -1,0 +1,51 @@
+'use strict';
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),ctx={window:{},Intl};
+for(const file of ['animals.js','learning.js'])vm.runInNewContext(fs.readFileSync(path.join(root,file),'utf8'),ctx);
+const L=ctx.window.MF_LEARNING,A=ctx.window.MF_ANIMALS;
+const fmt=n=>new Intl.NumberFormat('de-DE').format(n);
+assert.equal(L.topics.length,24);assert.equal(Object.keys(L.bank).length,480);
+for(const grade of [1,2,3,4])assert.equal(L.topics.filter(t=>t.grade===grade).length,6);
+for(const q of Object.values(L.bank)) {
+  let expected;
+  switch(q.kind) {
+    case 'count': expected=q.a;break;
+    case 'add': expected=q.a+q.b;break;
+    case 'sub': expected=q.a-q.b;assert.ok(expected>=0);break;
+    case 'mul': expected=q.a*q.b;break;
+    case 'div': expected=q.a/q.b;assert.ok(Number.isInteger(expected));break;
+    case 'compare': expected=q.a===q.b?'=':q.a<q.b?'<':'>';break;
+    case 'sequence': expected=q.a+4*q.b;break;
+    case 'shape': expected={circle:'Kreis',triangle:'Dreieck',square:'Quadrat',rectangle:'Rechteck'}[q.shape];break;
+    case 'clock': expected=q.a+':'+(q.b===30?'30':'00')+' Uhr';assert.ok(q.a>=1&&q.a<=12);break;
+    case 'money': expected=q.a+q.b;break;
+    case 'place': expected=100*q.a+10*q.b+q.c;break;
+    case 'large-place': expected=100000*q.a+10000*q.b+1000*q.c;break;
+    case 'measure': expected=q.unit==='m-to-cm'?q.a*100:q.a;break;
+    case 'fraction': expected=q.a+'/'+q.b;assert.ok(q.a>0&&q.a<q.b);break;
+    case 'area': expected=q.a*q.b;break;
+    case 'perimeter': expected=2*q.a+2*q.b;break;
+    default: assert.fail('Ungeprüfte Aufgabenart: '+q.kind);
+  }
+  assert.equal(q.answer,expected,q.id);
+  assert.equal(q.options.length,3,q.id);assert.equal(new Set(q.options).size,3,q.id);
+  const answer=typeof expected==='number'?fmt(expected)+(q.suffix||''):expected;
+  assert.equal(q.options[q.correct],answer,q.id);
+  assert.equal(q.options.filter(o=>o===answer).length,1,q.id);
+  assert.ok(q.hint&&q.explanation,q.id);
+  assert.deepEqual(JSON.parse(JSON.stringify(L.question(q.topic,q.variant))),JSON.parse(JSON.stringify(q)));
+  if(q.topic==='g1-add')assert.ok(expected<=20);
+  if(q.topic==='g2-add')assert.ok(expected<=100);
+  if(q.topic==='g3-add')assert.ok(expected<=1000);
+  if(q.topic==='g4-calculate')assert.ok(expected<=10000);
+}
+const pool=Object.values(L.bank).filter(q=>q.topic==='g1-add');
+const history=Object.fromEntries(pool.map((q,i)=>[q.id,{needsReview:i<3,lastAt:i+1}]));
+const ids=L.queue('g1-add',history,42);assert.equal(ids.length,5);assert.equal(new Set(ids).size,5);
+assert.ok(ids.slice(0,3).every(id=>history[id].needsReview));
+const untouched=L.queue('g1-add',{},42);assert.deepEqual([...untouched],[...L.queue('g1-add',{},42)]);
+assert.equal(A.worlds.length,4);assert.equal(A.animals.length,12);assert.equal(new Set(A.animals.map(a=>a.id)).size,12);
+for(const w of A.worlds)assert.equal(A.animals.filter(a=>a.world===w.id).length,3);
+for(const a of A.animals)assert.ok(!A.svg(a.id).includes('undefined'));
+console.log('OK: 480 Aufgaben unabhängig nachgerechnet, eindeutige Antworten, alle Zahlenräume, stabile IDs und Wiederholungen.');
+console.log('OK: vier Klassen, 24 Themen, vier Welten und zwölf Tierfreunde.');

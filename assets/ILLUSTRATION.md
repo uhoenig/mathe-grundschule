@@ -1,0 +1,7 @@
+# Bilderbuchillustration
+
+Datei: `learning-friends.webp`, 1672 × 941 Pixel, etwa 156 KB. Mit dem eingebauten Bildgenerierungswerkzeug am 19. November 2026 erzeugt und für die Website verlustbehaftet als WebP gespeichert. Original: lokal im Ausgabeverzeichnis des Bildgenerierungswerkzeugs. Die Tiere in `animals.js` sind eigene SVG-Vektorzeichnungen für Zählbilder und Albumkarten.
+
+## Verwendeter Prompt
+
+Use case: illustration-story. Asset type: wide website hero illustration for a German primary-school math learning app, ages 6 to 10. Create an exquisite warm hand-drawn children's picture book illustration, soft gouache paint, very subtle paper texture, rounded cute friendly animals with small black eyes, tiny warm rosy cheeks. A mint green baby brontosaurus on the right, a small caramel pony, a round peach piglet and a friendly golden lion cub form a charming group on a meadow with a few daisies, counting three small ochre wooden blocks. Broad soft sage plants, two rounded trees and pale warm cream sky. Calm playful composition, lovely restrained sage green, cream, warm golden yellow and coral colors. Horizontal landscape composition, animals clustered on center and right and no important content near edges, ample airy cream space on the left. Polished editorial illustration, flat painterly shapes, soft edges, not 3D, not photorealistic. No lettering, no words, no numerals, no watermarks, no user interface. Save the generated project asset as a file if supported.
