@@ -41,3 +41,20 @@ Die Website selbst hat keine npm-Abhängigkeiten. Die GitHub-Action prüft Aufga
 ## Grenzen
 
 Die mobile Prüfung verwendet Chromium-Fenster mit angepasster Größe. Echte iOS-/Android-Geräte und andere Browser wurden nicht separat geprüft. Es gibt keine automatische Gerätesynchronisierung und keinen Service Worker. Der Aufgabenpool ist ein erstes Grundlagenpaket; eine vollständige Lehrplanabdeckung und unabhängige didaktische Abnahme sind nicht behauptet.
+
+## Geführtes Lernen und Spaced Repetition · 20. November 2026
+
+Das Speicherformat wurde auf Version 2 erweitert; der Speicherplatz bleibt gleich. Version 1 wird im Arbeitsspeicher übernommen und erst mit der nächsten Aktion gespeichert. Vorhandene Antworten, Aufgaben-IDs, Tiere und laufende Runden bleiben erhalten. Eine alte Sicherung erzeugt keine nachträglich erfundene zeitliche Festigung.
+
+Zusätzlich geprüft:
+
+- Exakte Fälligkeit nach 1/3/7/14/30/60 Tagen; Fehler und Hilfebedarf führen zu einem Termin am Folgetag. Ein erster sicherer Versuch nach Hilfebedarf beginnt wieder mit einem Tag.
+- Vorzeitiges Üben erhöht weder Wiederholungsstufe noch die Zahl zeitlich verteilter Nachweise und verlängert keine Fälligkeit.
+- Tagesrunde mit fälligen Aufgaben aus mehreren Themen; keine Aufgaben aus höheren als der gewählten Klasse. Neue Aufgaben bleiben in der gewählten Klasse.
+- Übernahme eines alten vollständigen Lernstands und einer alten laufenden Runde, neue Zeitdaten im Sicherungsexport und Wiederherstellung; ungültige Zeitdaten werden abgewiesen.
+- Persistente Zählmarkierungen, zwei Hilfestufen, Zehnerfelder, unveränderte Antwortoptionen und volle Sterne bei ausschließlich angeforderten Tipps.
+- Vorlese-Interaktion mit nachgebildeter lokaler deutscher Stimme; mathematische Zeichen und Uhrzeiten werden passend umgeschrieben. Cloud-Stimmen werden nicht verwendet. Die tatsächliche Audioqualität hängt von den installierten Gerätestimmen ab und wurde nicht auf echten Mobilgeräten abgehört.
+- Erste Gartenbelohnung nach Runde 13, Zähler und Garten nach Neuladen; fortgesetzte Belohnungen auch nach allen zwölf Tieren.
+- Hilfen bei 320/390/768/1440 Pixeln ohne horizontalen Überlauf; Startknopf auf einem 320 × 700 großen Bildschirm sichtbar.
+
+Zusätzliche Prüfungen: `node tests/review.cjs` und `node tests/guided-browser.cjs`. Die CI prüft die unabhängige Aufgabenrechnung sowie die Wiederholungslogik und JavaScript-Syntax.

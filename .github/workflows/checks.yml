@@ -19,6 +19,12 @@ jobs:
           node --check app.js
           node --check learning.js
           node --check animals.js
+          node --check review.js
+          node --check help.js
+          node --check speech.js
+          node --check tests/guided-browser.cjs
           node --check tests/grundschule-browser.cjs
       - name: Alle Aufgaben unabhängig nachrechnen
-        run: node tests/learning.cjs
+        run: |
+          node tests/learning.cjs
+          node tests/review.cjs

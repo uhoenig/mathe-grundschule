@@ -8,5 +8,5 @@
 - Die Website bleibt statisches HTML/CSS/JavaScript mit relativen Asset-Pfaden.
 - Keine Konten, Trackingdienste oder externen Schriftarten hinzufügen.
 - Aufgaben-IDs und die Bedeutung gespeicherter Antworten stabil halten. Bei inkompatiblen Änderungen die Datenversion bewusst erhöhen.
-- Nach Inhaltsänderungen `node tests/learning.cjs`, nach Änderungen an Lernablauf oder Speicherung zusätzlich `node tests/grundschule-browser.cjs` ausführen.
+- Nach Inhaltsänderungen `node tests/learning.cjs` und `node tests/review.cjs`, nach Änderungen an Lernablauf oder Speicherung zusätzlich `node tests/grundschule-browser.cjs` und `node tests/guided-browser.cjs` ausführen.
 - Keine Lernstandsicherungen oder Test-Screenshots committen.

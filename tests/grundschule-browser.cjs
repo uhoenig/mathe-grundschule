@@ -4,7 +4,7 @@ let pw;try{pw=require('playwright');}catch{pw=require('/Applications/ChatGPT.app
 const root=path.resolve(__dirname,'..'),ctx={window:{},Intl};
 vm.runInNewContext(fs.readFileSync(path.join(root,'learning.js'),'utf8'),ctx);
 const L=ctx.window.MF_LEARNING,KEY='mathe-grundschule.progress.v1',base='https://grundschule.test/mathe-grundschule/';
-const allowed=new Set(['index.html','style.css','app.js','learning.js','animals.js','assets/favicon.svg','assets/learning-friends.webp']);
+const allowed=new Set(['index.html','style.css','app.js','learning.js','animals.js','review.js','help.js','speech.js','assets/favicon.svg','assets/learning-friends.webp']);
 const executablePath=fs.existsSync(pw.chromium.executablePath())?undefined:'/Applications/Brave Browser.app/Contents/MacOS/Brave Browser';
 const errors=[];
 async function open(browser,raw=null,options={}) {
@@ -20,6 +20,7 @@ async function open(browser,raw=null,options={}) {
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base+'bootstrap');
   await page.evaluate(({KEY,raw})=>{localStorage.setItem('mathequest.v1','abi-stand-bitte-behalten');if(raw!==null)localStorage.setItem(KEY,typeof raw==='string'?raw:JSON.stringify(raw));},{KEY,raw});
   if(options.writeError)await context.addInitScript(({KEY})=>{const set=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k===KEY&&window.failWrites!==false)throw new DOMException('Test','QuotaExceededError');return set.call(this,k,v);};},{KEY});
+  if(options.speechMock)await context.addInitScript(()=>{window.spokenTexts=[];window.cancelCount=0;Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{name:'Deutsch lokal',lang:'de-DE',localService:true},{name:'Deutsch Cloud',lang:'de-DE',localService:false}],cancel:()=>window.cancelCount++,speak:u=>window.spokenTexts.push({text:u.text,local:u.voice.localService}),addEventListener:()=>{}}});window.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};});
   await page.goto(base);await page.locator('main h1').waitFor();return {page,context,requests};
 }
 const saved=p=>p.evaluate(KEY=>JSON.parse(localStorage.getItem(KEY)),KEY);
@@ -35,7 +36,7 @@ async function finish(p) {
 }
 async function exportData(p){const pending=p.waitForEvent('download');await p.locator('[data-action="export"]').first().click();const d=await pending,s=await d.createReadStream(),chunks=[];for await(const c of s)chunks.push(c);return Buffer.concat(chunks).toString('utf8');}
 async function upload(p,raw){await p.locator('#import-file').setInputFiles({name:'lernstand.json',mimeType:'application/json',buffer:Buffer.from(typeof raw==='string'?raw:JSON.stringify(raw))});}
-(async()=>{const browser=await pw.chromium.launch({headless:true,executablePath});try{
+if(require.main===module)(async()=>{const browser=await pw.chromium.launch({headless:true,executablePath});try{
   const {page:p,context,requests}=await open(browser);
   assert.equal(await p.locator('.world-card').count(),4);assert.equal(await p.locator('.topic-card').count(),6);
   assert.equal(await p.locator('.hero-art img').evaluate(img=>img.complete&&img.naturalWidth>0),true);
@@ -87,3 +88,5 @@ async function upload(p,raw){await p.locator('#import-file').setInputFiles({name
   const offline=await browser.newContext({offline:true}),file=await offline.newPage();file.on('pageerror',e=>errors.push(e.message));await file.goto('file://'+path.join(root,'index.html'));await file.locator('.hero').waitFor();await file.locator('.hero [data-action="start"]').click();await file.locator('.question-title').waitFor();await file.locator('[data-action="explain"]').click();await file.locator('.feedback.success').waitFor();assert.deepEqual(errors,[]);await offline.close();
   console.log('OK GitHub-Pages-Unterpfad und direkter Offline-Dateistart. Alle Browserprüfungen bestanden.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
+
+module.exports={open,saved,solve,finish,upload,exportData,L,KEY,base,root,pw,executablePath};

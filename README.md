@@ -2,7 +2,7 @@
 
 Eine freundliche Mathe-Lernseite für ein Kind in Klasse 1–4. Link öffnen, Klasse und Tierwelt auswählen, loslernen. Ohne Anmeldung, Backend oder externe Laufzeitdienste.
 
-Geplante beziehungsweise nach Veröffentlichung aktive Adresse: **https://uhoenig.github.io/mathe-grundschule/**
+Online: **https://uhoenig.github.io/mathe-grundschule/**
 
 Dieses Projekt liegt im Ordner **Emilia** und gehört ausschließlich zum zusätzlichen Repository **uhoenig/mathe-grundschule**. Das Abi-Projekt im Ordner **Charlotte**, das Repository **uhoenig/mathe-abi** und dessen Veröffentlichung bleiben unabhängig erhalten.
 
@@ -13,8 +13,11 @@ Dieses Projekt liegt im Ordner **Emilia** und gehört ausschließlich zum zusät
 - Fünf Multiple-Choice-Aufgaben mit jeweils drei verschiedenen Antworten pro Runde.
 - Bei Fehlern helfen Hinweise und ein weiterer Versuch. Ein Lösungsweg lässt sich jederzeit anzeigen.
 - Mengenbilder, Formen, analoge Uhren, Bruchbilder und Rechtecke unterstützen das Verstehen.
-- Neue Aufgaben und Aufgaben mit Hilfebedarf werden bevorzugt; bereits bekannte Aufgaben kommen später wieder.
-- Eine abgeschlossene Runde bringt ein Tier, auch wenn Tipps nötig waren. Sterne können durch weitere Runden verbessert werden. Keine Zeitlimits oder Ranglisten.
+- Geführtes Tagesabenteuer: bis zu drei fällige Wiederholungen aus verschiedenen Themen und passenden niedrigeren Klassen, ergänzt um neue Aufgaben aus der gewählten Klasse. Ohne neue Aufgaben sind bis zu fünf Wiederholungen möglich. Freie Themenwahl bleibt erhalten.
+- Spaced Repetition nach 1, 3, 7, 14, 30 und 60 Tagen. Nach Fehlern oder Hilfebedarf wird am nächsten Tag wiederholt. Vorzeitiges Zusatzüben verlängert keine Fälligkeit.
+- Hilfen in zwei Stufen, bebilderte Rechenschritte mit Zehnerfeldern und antippbare Zähltiere. Vorlesen von Aufgabe, Antwortmöglichkeiten und Erklärung über eine lokale deutsche Gerätestimme, falls verfügbar.
+- Hilfenutzung beeinflusst die Wiederholungsplanung, kostet aber keine Sterne. Fortschrittslabels unterscheiden Kennenlernen, Üben und Festigen über mehrere Tage.
+- Eine abgeschlossene Runde bringt ein Tier, auch wenn Tipps nötig waren. Nach zwölf Tieren werden Blumen, Bäume und weitere Dinge für einen dauerhaft wachsenden Tiergarten gesammelt. Sterne können durch weitere Runden verbessert werden. Keine Zeitlimits oder Ranglisten.
 - Eine laufende Runde bleibt nach Neuladen erhalten. Klasse und Welt sind außerhalb der Runde wechselbar; die laufende Runde behält ihre ursprüngliche Welt.
 
 Dies ist ein erstes Grundlagenpaket, keine vollständige Abbildung aller Grundschullehrpläne. Die Klassenstufen sind eine Orientierung; der Lernpfad kann frei gewählt werden.
@@ -34,6 +37,8 @@ Danach http://localhost:8080 öffnen. Die Website benötigt keinen Build-Schritt
 ## Speicherung
 
 Der Lernstand liegt unter `mathe-grundschule.progress.v1` im `localStorage`. Die App liest oder verändert keine Speicherplätze des Abi-Projekts. Geräte und Browser synchronisieren sich nicht automatisch. Datei-Aufrufe und die GitHub-Pages-Adresse können unterschiedliche lokale Lernstände haben.
+
+Das Datenformat ist Version 2. Version-1-Stände einschließlich laufender Runden werden beim Laden im Arbeitsspeicher ergänzt; gespeichert wird erst bei der nächsten Aktion. Vorhandene Aufgaben-IDs und Antwortreihenfolgen bleiben gleich. Alte Lernverläufe erhalten einen ersten Termin einen Tag nach ihrem letzten Versuch; eine bisher nicht gemessene zeitliche Festigung wird nicht angenommen.
 
 Unter **Für Erwachsene** lassen sich Sicherungen als JSON herunterladen und nach Prüfung und Bestätigung wiederherstellen. Browserdaten löschen und privates Surfen können den Lernstand entfernen. Sicherungsdateien enthalten Lerndaten und gehören nicht ins öffentliche Repository.
 
@@ -55,6 +60,8 @@ Eine erste stabile Version kann auf `main` veröffentlicht werden. Weitere Ände
 | --- | --- |
 | `index.html` | Seitengerüst und Navigation |
 | `app.js` | Lernablauf, lokale Speicherung, Album und Sicherungen |
+| `review.js` | Zeitplanung, Themenstatus, Tagesrunde und Gartenbelohnungen |
+| `help.js` / `speech.js` | Rechenschritte und ausschließlich lokale deutsche Sprachausgabe |
 | `learning.js` | 24 Themen und deterministisch erzeugte Aufgabenvarianten |
 | `animals.js` | Vier Welten und eigene SVG-Tierfiguren |
 | `style.css` | Gestaltung für Desktop, Tablet und Smartphone |
@@ -64,7 +71,9 @@ Eine erste stabile Version kann auf `main` veröffentlicht werden. Weitere Ände
 
 ```sh
 node tests/learning.cjs
+node tests/review.cjs
 node tests/grundschule-browser.cjs
+node tests/guided-browser.cjs
 ```
 
 Die Browserprüfung benötigt Playwright mit Chromium. Auf dem Entwicklungsrechner kann sie den bereits installierten Brave-Browser verwenden. Screenshots liegen nach dem Testlauf im ignorierten Ordner `tests/`.
